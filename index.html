@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NETCHILL | Watch Movies and TV Shows Online</title>
+    <meta
+      name="description"
+      content="Netflix-inspired streaming landing page with hero banner, features, FAQ, and call-to-action sections."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container nav">
+        <div class="brand" aria-label="Netchill home">NETCHILL</div>
+        <div class="nav-actions">
+          <button class="btn btn-ghost" type="button">English</button>
+          <button class="btn btn-primary" type="button" id="open-signin">Sign In</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="modal-overlay" id="signin-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+        <button class="modal-close" type="button" aria-label="Close sign in dialog">×</button>
+        <h2 id="signin-title">Sign In</h2>
+        <form class="signin-form" id="signin-form">
+          <label>
+            <span>Email</span>
+            <input type="email" name="email" placeholder="Enter your email" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input type="password" name="password" placeholder="Enter your password" required />
+          </label>
+          <button type="submit" class="btn btn-primary modal-submit">Sign In</button>
+        </form>
+      </div>
+    </div>
+
+    <main>
+      <section class="hero">
+        <div class="hero-backdrop"></div>
+        <div class="container hero-content">
+          <p class="eyebrow">New & trending</p>
+          <h1>Unlimited movies, TV shows, and more.</h1>
+          <p class="subtitle">Watch anywhere. Cancel anytime.</p>
+
+          <form class="signup-form" aria-label="Email signup form">
+            <label class="sr-only" for="email">Email address</label>
+            <input id="email" type="email" placeholder="Email address" />
+            <button type="submit">Get Started</button>
+          </form>
+
+          <p class="signup-note">
+            Ready to watch? Enter your email to create or restart your membership.
+          </p>
+        </div>
+      </section>
+
+      <section class="feature-strip" aria-label="Platform highlights">
+        <div class="container feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon">▶</div>
+            <div>
+              <h3>Enjoy on your TV</h3>
+              <p>Stream on smart TVs, PlayStation, Xbox, Chromecast, Apple TV, and more.</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">↓</div>
+            <div>
+              <h3>Download and go</h3>
+              <p>Save your favorites and watch offline whenever you’re on the move.</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">✦</div>
+            <div>
+              <h3>Watch everywhere</h3>
+              <p>Enjoy seamless streaming across your phone, tablet, laptop, and TV.</p>
+            </div>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon">👨‍👩‍👧</div>
+            <div>
+              <h3>Create profiles for kids</h3>
+              <p>Fun, safe viewing built for the whole family with age-appropriate content.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="showcase">
+        <div class="container showcase-row reverse">
+          <div class="showcase-copy">
+            <p class="eyebrow secondary">Enjoy on your TV</p>
+            <h2>Watch on Smart TVs, PlayStation, Xbox, and more.</h2>
+            <p>
+              Stream your favorite series and blockbuster movies in stunning quality on your
+              screen of choice.
+            </p>
+          </div>
+          <div class="showcase-media media-tv" aria-label="TV streaming illustration">
+            <img
+              src="https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=900&q=80"
+              alt="Movie night on a television"
+            />
+          </div>
+        </div>
+
+        <div class="container showcase-row">
+          <div class="showcase-media media-mobile" aria-label="Mobile app illustration">
+            <img
+              src="https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?auto=format&fit=crop&w=900&q=80"
+              alt="Person watching media on mobile device"
+            />
+          </div>
+          <div class="showcase-copy">
+            <p class="eyebrow secondary">Download and go</p>
+            <h2>Save your favorites for offline viewing.</h2>
+            <p>
+              Download episodes and movies to your device and keep watching even when you’re
+              offline.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="faq">
+        <div class="container faq-inner">
+          <h2>Frequently asked questions</h2>
+
+          <div class="faq-list">
+            <div class="faq-item active">
+              <button class="faq-question" type="button">
+                What is Netchill?
+                <span>+</span>
+              </button>
+              <div class="faq-answer">
+                <p>
+                  Netchill is a streaming service that offers a wide variety of award-winning TV
+                  shows, movies, anime, documentaries, and more.
+                </p>
+              </div>
+            </div>
+
+            <div class="faq-item">
+              <button class="faq-question" type="button">
+                How much does Netchill cost?
+                <span>+</span>
+              </button>
+              <div class="faq-answer">
+                <p>
+                  Plans start at a low monthly rate and include access to thousands of titles with
+                  no extra commitment.
+                </p>
+              </div>
+            </div>
+
+            <div class="faq-item">
+              <button class="faq-question" type="button">
+                Where can I watch?
+                <span>+</span>
+              </button>
+              <div class="faq-answer">
+                <p>
+                  Watch anywhere you have internet, including on your phone, tablet, computer, or
+                  smart TV.
+                </p>
+              </div>
+            </div>
+
+            <div class="faq-item">
+              <button class="faq-question" type="button">
+                How do I cancel?
+                <span>+</span>
+              </button>
+              <div class="faq-answer">
+                <p>
+                  You can cancel anytime from your account settings with no hidden fees or long-term
+                  commitments.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <form class="signup-form faq-signup" aria-label="Email signup form on FAQ section">
+            <label class="sr-only" for="email-faq">Email address</label>
+            <input id="email-faq" type="email" placeholder="Email address" />
+            <button type="submit">Get Started</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <p>Questions? Call 1-800-NETCHILL</p>
+        <div class="footer-links">
+          <a href="#">FAQ</a>
+          <a href="#">Help Center</a>
+          <a href="#">Account</a>
+          <a href="#">Media Center</a>
+          <a href="#">Investor Relations</a>
+          <a href="#">Jobs</a>
+        </div>
+        <p class="copyright">© 2026 Netchill, Inc.</p>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

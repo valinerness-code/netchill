@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Netchill Home</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="home.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container nav">
+        <div class="brand">NETCHILL</div>
+        <nav class="nav-links" aria-label="Main navigation">
+          <button class="nav-link active" data-view="home" type="button">Home</button>
+          <button class="nav-link" data-view="series" type="button">Series</button>
+          <button class="nav-link" data-view="movies" type="button">Movies</button>
+          <button class="nav-link" data-view="my-list" type="button">My List</button>
+        </nav>
+        <button class="profile-btn" type="button">Profile</button>
+      </div>
+    </header>
+
+    <main class="home-page">
+      <section class="hero-panel">
+        <div class="container hero-copy">
+          <p class="eyebrow">Trending now</p>
+          <h1>Welcome back</h1>
+          <p class="welcome-text">Thank you for signing in.</p>
+        </div>
+      </section>
+
+      <section class="catalog">
+        <div class="container">
+          <div class="category-block visible" data-category="movies">
+            <div class="row-header">
+              <h2>Movies</h2>
+              <div class="scroll-controls" aria-label="Movie controls">
+                <button class="scroll-btn left" type="button" aria-label="Scroll left">‹</button>
+                <button class="scroll-btn right" type="button" aria-label="Scroll right">›</button>
+              </div>
+            </div>
+            <div class="media-row" data-row="movies">
+              <article class="media-card movie-card">
+                <div class="poster poster-one">Midnight Run</div>
+                <h3>Midnight Run</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-two">Skyline</div>
+                <h3>Skyline</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-five">Crimson Tide</div>
+                <h3>Crimson Tide</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-six">Neon Glow</div>
+                <h3>Neon Glow</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-seven">Echo Harbor</div>
+                <h3>Echo Harbor</h3>
+              </article>
+            </div>
+          </div>
+
+          <div class="category-block visible" data-category="shows">
+            <div class="row-header">
+              <h2>TV Shows</h2>
+              <div class="scroll-controls" aria-label="TV show controls">
+                <button class="scroll-btn left" type="button" aria-label="Scroll left">‹</button>
+                <button class="scroll-btn right" type="button" aria-label="Scroll right">›</button>
+              </div>
+            </div>
+            <div class="media-row" data-row="shows">
+              <article class="media-card show-card">
+                <div class="poster poster-three">Nightfall</div>
+                <h3>Nightfall</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-four">Signal Ridge</div>
+                <h3>Signal Ridge</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-eight">Glass City</div>
+                <h3>Glass City</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-nine">Thorn Lane</div>
+                <h3>Thorn Lane</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-ten">Velvet Echo</div>
+                <h3>Velvet Echo</h3>
+              </article>
+            </div>
+          </div>
+
+          <div class="category-block" data-category="my-list">
+            <div class="row-header">
+              <h2>My List</h2>
+              <div class="scroll-controls" aria-label="My list controls">
+                <button class="scroll-btn left" type="button" aria-label="Scroll left">‹</button>
+                <button class="scroll-btn right" type="button" aria-label="Scroll right">›</button>
+              </div>
+            </div>
+            <div class="media-row" data-row="my-list">
+              <article class="media-card list-card">
+                <div class="poster poster-eleven">Afterlight</div>
+                <h3>Afterlight</h3>
+              </article>
+              <article class="media-card list-card">
+                <div class="poster poster-twelve">Iron Tide</div>
+                <h3>Iron Tide</h3>
+              </article>
+              <article class="media-card list-card">
+                <div class="poster poster-thirteen">The Last Echo</div>
+                <h3>The Last Echo</h3>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="home.js"></script>
+  </body>
+</html>
