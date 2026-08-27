@@ -34,11 +34,16 @@
         <form class="signin-form" id="signin-form">
           <label>
             <span>Email</span>
-            <input type="email" name="email" placeholder="Enter your email" required />
+            <input type="email" name="email" placeholder="Enter your email" required maxlength="255" />
           </label>
-          <label>
+          <label class="password-field">
             <span>Password</span>
-            <input type="password" name="password" placeholder="Enter your password" required />
+            <div class="password-input-wrap">
+              <input type="password" name="password" placeholder="Enter your password" required minlength="6" maxlength="128" />
+              <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+                <span class="toggle-icon" aria-hidden="true">👁</span>
+              </button>
+            </div>
           </label>
           <button type="submit" class="btn btn-primary modal-submit">Sign In</button>
         </form>
@@ -55,7 +60,7 @@
 
           <form class="signup-form" aria-label="Email signup form">
             <label class="sr-only" for="email">Email address</label>
-            <input id="email" type="email" placeholder="Email address" />
+            <input id="email" type="email" placeholder="Email address" required maxlength="255" />
             <button type="submit">Get Started</button>
           </form>
 
@@ -194,7 +199,7 @@
 
           <form class="signup-form faq-signup" aria-label="Email signup form on FAQ section">
             <label class="sr-only" for="email-faq">Email address</label>
-            <input id="email-faq" type="email" placeholder="Email address" />
+            <input id="email-faq" type="email" placeholder="Email address" required maxlength="255" />
             <button type="submit">Get Started</button>
           </form>
         </div>

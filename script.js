@@ -1,4 +1,70 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Security utility functions
+  const SecurityUtils = {
+    sanitizeInput: (input) => {
+      if (input === null || input === undefined) return "";
+      const safeValue = String(input).trim();
+      const div = document.createElement("div");
+      div.textContent = safeValue;
+      return div.innerHTML;
+    },
+
+    validateEmail: (email) => {
+      if (typeof email !== "string") return false;
+      const normalized = email.trim();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(normalized);
+    },
+
+    validatePassword: (password) => {
+      if (typeof password !== "string") return false;
+      const trimmed = password.trim();
+      if (trimmed.length < 6 || trimmed.length > 128) return false;
+      return /^[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':",./<>?]*$/.test(trimmed);
+    },
+
+    sanitizeSQL: (input) => {
+      return String(input).replace(/['"`;\\]/g, "");
+    },
+
+    escapeHTML: (text) => {
+      const map = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      };
+      return String(text).replace(/[&<>"']/g, (m) => map[m]);
+    },
+
+    safeRedirect: (targetPage) => {
+      const safePages = new Set([
+        "index.html",
+        "membership.html",
+        "home.html",
+        "manage-profiles.html",
+        "account.html",
+        "help-center.html",
+      ]);
+      const normalized = String(targetPage || "").trim();
+
+      if (safePages.has(normalized)) {
+        window.location.href = normalized;
+      }
+    },
+  };
+
+  const readStoredUser = () => {
+    try {
+      const raw = localStorage.getItem("netchill-user");
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      localStorage.removeItem("netchill-user");
+      return null;
+    }
+  };
+
   const faqItems = document.querySelectorAll(".faq-item");
 
   faqItems.forEach((item) => {
@@ -23,16 +89,23 @@ document.addEventListener("DOMContentLoaded", () => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const input = form.querySelector("input");
-      const value = input.value.trim();
+      const value = SecurityUtils.sanitizeInput(input.value);
 
       if (!value) {
+        input.value = "";
         input.focus();
         input.placeholder = "Please enter a valid email";
         return;
       }
+      if (!SecurityUtils.validateEmail(value)) {
+        input.value = "";
+        input.placeholder = "Please enter a valid email address";
+        input.focus();
+        return;
+      }
 
-      alert("Thanks! We’ll keep you posted on the latest releases.");
-      form.reset();
+      sessionStorage.setItem("netchill-signup-email", value);
+      window.location.href = "membership.html";
     });
   });
 
@@ -40,6 +113,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const openButton = document.getElementById("open-signin");
   const closeButton = document.querySelector(".modal-close");
   const signinForm = document.getElementById("signin-form");
+  const passwordInput = signinForm?.querySelector('input[name="password"]');
+  const passwordToggle = signinForm?.querySelector(".password-toggle");
+
+  const storedUser = readStoredUser();
+
+  if (storedUser && SecurityUtils.validateEmail(storedUser.email) && window.location.pathname.endsWith("index.html")) {
+    SecurityUtils.safeRedirect("home.html");
+  }
 
   function openModal() {
     modal.classList.add("visible");
@@ -66,31 +147,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  signinForm.addEventListener("submit", (event) => {
+  passwordToggle?.addEventListener("click", () => {
+    const isPassword = passwordInput.type === "password";
+    passwordInput.type = isPassword ? "text" : "password";
+    passwordToggle.setAttribute("aria-label", isPassword ? "Hide password" : "Show password");
+    passwordToggle.setAttribute("aria-pressed", String(isPassword));
+    passwordInput.focus();
+  });
+
+  signinForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const email = signinForm.email.value.trim();
-    const password = signinForm.password.value.trim();
+    const email = SecurityUtils.sanitizeInput(signinForm.email.value);
+    const password = SecurityUtils.sanitizeInput(signinForm.password.value);
 
     if (!email || !password) {
+      alert("Please fill in all fields.");
       return;
     }
 
-    const user = { email, password };
-    localStorage.setItem("netchill-user", JSON.stringify(user));
+    if (!SecurityUtils.validateEmail(email)) {
+      signinForm.email.value = "";
+      signinForm.email.placeholder = "Enter a valid email";
+      signinForm.email.focus();
+      return;
+    }
 
-    const confirmationMessage = encodeURIComponent(
-      `Thank you for signing in.\n\nEmail: ${email}\nPassword: ${password}`
-    );
-    const mailLink = `mailto:${email}?subject=${encodeURIComponent(
-      "Welcome to Netchill"
-    )}&body=${confirmationMessage}`;
+    if (!SecurityUtils.validatePassword(password)) {
+      signinForm.password.value = "";
+      signinForm.password.placeholder = "Password must be 6+ characters";
+      signinForm.password.focus();
+      return;
+    }
 
-    window.location.href = mailLink;
-    setTimeout(() => {
-      window.location.href = "home.html";
-    }, 500);
-
-    signinForm.reset();
-    closeModal();
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ email, password }),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      localStorage.setItem("netchill-user", JSON.stringify({ email }));
+      signinForm.reset();
+      closeModal();
+      SecurityUtils.safeRedirect("home.html");
+    } catch (error) {
+      alert(error.message || "Could not sign in.");
+    }
   });
 });

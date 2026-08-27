@@ -2,6 +2,29 @@
 
 A Netflix-inspired landing page and sign-in flow built with plain HTML, CSS, and JavaScript.
 
+## Security Features
+
+This application includes multiple layers of security protection:
+
+### Input Validation & Sanitization
+- **Email validation**: Regex-based format validation for all email inputs
+- **Password validation**: Minimum 6 characters with allowed character set restrictions
+- **HTML escaping**: XSS prevention by converting special characters (`<`, `>`, `&`, `"`, `'`) to HTML entities
+- **SQL injection prevention**: Removal of potentially harmful SQL characters (`'`, `"`, `;`, backtick, backslash)
+- **Input trimming**: All form inputs are trimmed of whitespace before processing
+
+### HTTP Security Headers
+- **Content-Security-Policy (CSP)**: Prevents inline script execution and restricts resource loading
+- **X-Content-Type-Options**: Prevents MIME-type sniffing attacks
+- **X-Frame-Options**: Protects against clickjacking by restricting framing
+- **X-XSS-Protection**: Additional XSS protection header
+- **Referrer-Policy**: Controls referrer information leakage
+
+### Protected Endpoints
+- Sign-up form: Email sanitized before alert display
+- Sign-in form: Email and password sanitized, only email stored (never store passwords)
+- All inputs validated before localStorage storage or external links
+
 ## Local development
 
 ### Option 1: Python static server

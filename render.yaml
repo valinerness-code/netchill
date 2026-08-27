@@ -7,3 +7,5 @@ services:
     envVars:
       - key: PORT
         value: "80"
+      - key: DATABASE_URL
+        sync: false

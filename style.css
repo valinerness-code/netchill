@@ -174,6 +174,40 @@ input {
   font-size: 0.9rem;
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-input-wrap {
+  position: relative;
+}
+
+.password-input-wrap input {
+  width: 100%;
+  padding-right: 4rem;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+
+.toggle-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
 .signin-form input {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.15);
@@ -473,6 +507,177 @@ input {
   color: var(--muted);
 }
 
+.membership-page {
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(229, 9, 20, 0.16), transparent 35%),
+    radial-gradient(circle at 80% 15%, rgba(255, 255, 255, 0.08), transparent 28%),
+    var(--bg);
+}
+
+.membership-nav {
+  position: relative;
+  padding: 1.2rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.membership-main {
+  padding: 4rem 0 5rem;
+}
+
+.membership-shell {
+  width: min(760px, 100%);
+  margin: 0 auto;
+}
+
+.membership-heading {
+  max-width: 600px;
+  margin-bottom: 2rem;
+}
+
+.membership-heading h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  letter-spacing: -0.06em;
+  line-height: 1.05;
+}
+
+.membership-heading p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.membership-form {
+  display: grid;
+  gap: 1.75rem;
+}
+
+.membership-section {
+  padding: 1.5rem;
+  background: rgba(31, 31, 31, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+}
+
+.membership-section h2 {
+  margin: 0 0 1.25rem;
+  font-size: 1.2rem;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.plan-option {
+  position: relative;
+}
+
+.plan-option input {
+  position: absolute;
+  opacity: 0;
+}
+
+.plan-option label {
+  display: block;
+  height: 100%;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.plan-option label:hover,
+.plan-option input:focus-visible + label {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.plan-option input:checked + label {
+  border-color: var(--brand);
+  background: rgba(229, 9, 20, 0.12);
+}
+
+.plan-name,
+.plan-price {
+  display: block;
+}
+
+.plan-name {
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+}
+
+.plan-price {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.membership-fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.membership-fields .full-width {
+  grid-column: 1 / -1;
+}
+
+.membership-form label {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.membership-form input,
+.membership-form select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 0.85rem 0.9rem;
+}
+
+.membership-form select option {
+  color: #111;
+}
+
+.membership-terms {
+  display: flex !important;
+  align-items: start;
+  gap: 0.65rem !important;
+  line-height: 1.4;
+}
+
+.membership-terms input {
+  width: auto;
+  margin-top: 0.2rem;
+  accent-color: var(--brand);
+}
+
+.membership-terms a {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.membership-submit {
+  width: 100%;
+  border: 0;
+  border-radius: 0.45rem;
+  cursor: pointer;
+  font-size: 1.05rem;
+}
+
+.membership-error {
+  margin: -0.75rem 0 0;
+  color: #ff9da2;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .feature-grid {
     grid-template-columns: 1fr;
@@ -530,5 +735,18 @@ input {
   .faq h2,
   .showcase-copy h2 {
     letter-spacing: -0.04em;
+  }
+
+  .membership-main {
+    padding: 2.5rem 0 3rem;
+  }
+
+  .plan-grid,
+  .membership-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .membership-fields .full-width {
+    grid-column: auto;
   }
 }

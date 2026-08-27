@@ -22,9 +22,106 @@
           <button class="nav-link" data-view="movies" type="button">Movies</button>
           <button class="nav-link" data-view="my-list" type="button">My List</button>
         </nav>
-        <button class="profile-btn" type="button">Profile</button>
+
+        <div class="profile-wrap" aria-label="Profile menu">
+          <button
+            class="profile-btn"
+            type="button"
+            aria-expanded="false"
+            aria-controls="profile-menu"
+          >
+            <span class="profile-avatar" aria-hidden="true">A</span>
+            <span class="profile-label">Alex</span>
+            <span class="profile-caret" aria-hidden="true">▾</span>
+          </button>
+
+          <div class="profile-menu" id="profile-menu" role="menu" aria-label="Account menu">
+            <button class="profile-menu-item active" type="button" role="menuitem" data-name="Alex" data-color="amber">
+              <span class="menu-avatar amber" aria-hidden="true">A</span>
+              Alex
+            </button>
+            <button class="profile-menu-item" type="button" role="menuitem" data-name="Mia" data-color="pink">
+              <span class="menu-avatar pink" aria-hidden="true">M</span>
+              Mia
+            </button>
+            <button class="profile-menu-item" type="button" role="menuitem" data-name="Kids" data-color="blue">
+              <span class="menu-avatar blue" aria-hidden="true">K</span>
+              Kids
+            </button>
+
+            <div class="profile-divider" aria-hidden="true"></div>
+
+            <button class="profile-menu-item profile-link" type="button" role="menuitem" data-page="manage-profiles.html">
+              Manage Profiles
+            </button>
+            <button class="profile-menu-item profile-link" type="button" role="menuitem" data-page="account.html">
+              Account
+            </button>
+            <button class="profile-menu-item profile-link" type="button" role="menuitem" data-page="help-center.html">
+              Help Center
+            </button>
+            <button class="profile-menu-item profile-link sign-out" type="button" role="menuitem">Sign out of Netchill</button>
+          </div>
+        </div>
       </div>
     </header>
+
+    <div class="panel-overlay hidden" id="panel-overlay" aria-hidden="true">
+      <div class="panel-modal" id="profiles-modal" role="dialog" aria-modal="true" aria-labelledby="profiles-title">
+        <button class="panel-close" type="button" aria-label="Close manage profiles">×</button>
+        <p class="panel-kicker">Profiles</p>
+        <h2 id="profiles-title">Manage Profiles</h2>
+        <div class="profile-grid">
+          <button class="profile-card active" type="button">
+            <span class="card-avatar amber">A</span>
+            <span>Alex</span>
+          </button>
+          <button class="profile-card" type="button">
+            <span class="card-avatar pink">M</span>
+            <span>Mia</span>
+          </button>
+          <button class="profile-card" type="button">
+            <span class="card-avatar blue">K</span>
+            <span>Kids</span>
+          </button>
+          <button class="profile-card add" type="button">+ Add Profile</button>
+        </div>
+      </div>
+
+      <div class="panel-modal" id="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title">
+        <button class="panel-close" type="button" aria-label="Close account">×</button>
+        <p class="panel-kicker">Account</p>
+        <h2 id="account-title">Account Details</h2>
+        <div class="account-list">
+          <div class="account-row"><span>Membership & Billing</span><strong>Premium</strong></div>
+          <div class="account-row"><span>Email</span><strong>alex@example.com</strong></div>
+          <div class="account-row"><span>Plan</span><strong>4K + HDR</strong></div>
+          <div class="account-row"><span>Playback</span><strong>Auto</strong></div>
+        </div>
+      </div>
+
+      <div class="panel-modal" id="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <button class="panel-close" type="button" aria-label="Close help center">×</button>
+        <p class="panel-kicker">Help Center</p>
+        <h2 id="help-title">How can we help?</h2>
+        <ul class="help-list">
+          <li>Troubleshooting playback issues</li>
+          <li>Managing your plan and billing</li>
+          <li>Using parental controls</li>
+          <li>Contacting support</li>
+        </ul>
+      </div>
+
+      <div class="panel-modal signout-modal" id="signout-modal" role="dialog" aria-modal="true" aria-labelledby="signout-title">
+        <button class="panel-close" type="button" aria-label="Close sign out">×</button>
+        <p class="panel-kicker">Leaving so soon?</p>
+        <h2 id="signout-title">Sign out of Netchill?</h2>
+        <div class="modal-actions">
+          <button class="panel-button muted" type="button" data-close-panel="true">Cancel</button>
+          <button class="panel-button danger" type="button">Sign Out</button>
+        </div>
+      </div>
+    </div>
 
     <main class="home-page">
       <section class="hero-panel">
@@ -66,6 +163,18 @@
                 <div class="poster poster-seven">Echo Harbor</div>
                 <h3>Echo Harbor</h3>
               </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-fourteen">Phantom Edge</div>
+                <h3>Phantom Edge</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-fifteen">Neon Nights</div>
+                <h3>Neon Nights</h3>
+              </article>
+              <article class="media-card movie-card">
+                <div class="poster poster-sixteen">Silent Oath</div>
+                <h3>Silent Oath</h3>
+              </article>
             </div>
           </div>
 
@@ -97,6 +206,18 @@
               <article class="media-card show-card">
                 <div class="poster poster-ten">Velvet Echo</div>
                 <h3>Velvet Echo</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-seventeen">Shadow Peak</div>
+                <h3>Shadow Peak</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-eighteen">Storm Rising</div>
+                <h3>Storm Rising</h3>
+              </article>
+              <article class="media-card show-card">
+                <div class="poster poster-nineteen">Crystal Heart</div>
+                <h3>Crystal Heart</h3>
               </article>
             </div>
           </div>

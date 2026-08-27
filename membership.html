@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Start Your Membership | Netchill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="membership-page">
+    <header class="membership-nav">
+      <div class="container nav">
+        <a class="brand" href="index.html" aria-label="Netchill home">NETCHILL</a>
+        <a class="btn btn-ghost" href="index.html">Back</a>
+      </div>
+    </header>
+
+    <main class="membership-main">
+      <div class="container membership-shell">
+        <div class="membership-heading">
+          <p class="eyebrow">One step away</p>
+          <h1>Start your membership.</h1>
+          <p>Choose a plan, create your account, and start watching right away.</p>
+        </div>
+
+        <form class="membership-form" id="membership-form">
+          <section class="membership-section" aria-labelledby="plan-title">
+            <h2 id="plan-title">Choose your plan</h2>
+            <div class="plan-grid">
+              <div class="plan-option">
+                <input id="basic-plan" type="radio" name="plan" value="Basic" />
+                <label for="basic-plan">
+                  <span class="plan-name">Basic</span>
+                  <span class="plan-price">$8.99 / month</span>
+                </label>
+              </div>
+              <div class="plan-option">
+                <input id="standard-plan" type="radio" name="plan" value="Standard" checked />
+                <label for="standard-plan">
+                  <span class="plan-name">Standard</span>
+                  <span class="plan-price">$15.49 / month</span>
+                </label>
+              </div>
+              <div class="plan-option">
+                <input id="premium-plan" type="radio" name="plan" value="Premium" />
+                <label for="premium-plan">
+                  <span class="plan-name">Premium</span>
+                  <span class="plan-price">$22.99 / month</span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="membership-section" aria-labelledby="account-title">
+            <h2 id="account-title">Create your account</h2>
+            <div class="membership-fields">
+              <label class="full-width">
+                Email address
+                <input id="membership-email" name="email" type="email" autocomplete="email" required maxlength="255" />
+              </label>
+              <label>
+                First name
+                <input name="firstName" type="text" autocomplete="given-name" required maxlength="80" />
+              </label>
+              <label>
+                Last name
+                <input name="lastName" type="text" autocomplete="family-name" required maxlength="80" />
+              </label>
+              <label class="full-width">
+                Password
+                <input name="password" type="password" autocomplete="new-password" required minlength="6" maxlength="128" />
+              </label>
+            </div>
+          </section>
+
+          <section class="membership-section" aria-labelledby="payment-title">
+            <h2 id="payment-title">Payment details</h2>
+            <div class="membership-fields">
+              <label class="full-width">
+                Card number
+                <input name="cardNumber" type="text" inputmode="numeric" autocomplete="cc-number" placeholder="1234 5678 9012 3456" required minlength="12" maxlength="19" />
+              </label>
+              <label>
+                Expiration date
+                <input name="expiration" type="text" inputmode="numeric" autocomplete="cc-exp" placeholder="MM / YY" required maxlength="7" />
+              </label>
+              <label>
+                Security code
+                <input name="securityCode" type="text" inputmode="numeric" autocomplete="cc-csc" placeholder="123" required minlength="3" maxlength="4" />
+              </label>
+            </div>
+          </section>
+
+          <label class="membership-terms">
+            <input name="terms" type="checkbox" required />
+            <span>I agree to the Netchill terms and understand that my membership renews monthly.</span>
+          </label>
+          <p class="membership-error" id="membership-error" role="alert" hidden></p>
+          <button class="btn btn-primary membership-submit" type="submit">Start Membership</button>
+        </form>
+      </div>
+    </main>
+
+    <script src="membership.js"></script>
+  </body>
+</html>
