@@ -33,7 +33,8 @@ public final class AuthServer {
     }
 
     public static void main(String[] args) throws IOException, SQLException {
-        int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
+        int port = Integer.parseInt(System.getenv().getOrDefault("API_PORT",
+            System.getenv().getOrDefault("PORT", "8080")));
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api/register", AuthServer::register);
         server.createContext("/api/login", AuthServer::login);
