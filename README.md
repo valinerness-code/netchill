@@ -40,41 +40,20 @@ Then open:
 http://localhost:8000
 ```
 
-### Option 2: Docker Compose
-
-```bash
-cd /workspaces/netchill
-docker compose up --build
-```
-
-Then open:
-
-```text
-http://localhost:80
-```
-
-## Docker build
-
-```bash
-docker build -t netchill:latest .
-docker run -p 80:80 netchill:latest
-```
-
 ## Render deployment
 
 1. Push this project to a GitHub repository.
 2. On Render, click New + and choose Web Service.
 3. Connect your GitHub repo.
 4. Use the following settings:
-   - Runtime: Docker
-   - Dockerfile path: `Dockerfile`
-   - Root directory: `.`
-5. Click Create Web Service.
-6. Render will build and deploy the container automatically.
+   - Runtime: Static Site
+   - Publish directory: `.`
+5. Click Create Static Site.
+6. Create a Render Postgres database named `netchill-db` for the database configuration in `render.yaml`.
 
 ### Render config
 
-This repository includes a `render.yaml` file for the basic Render setup.
+This repository includes a `render.yaml` file that configures the static site and Render Postgres database.
 
 ## Notes
 

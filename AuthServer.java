@@ -20,6 +20,7 @@ import java.sql.SQLException;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Properties;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
@@ -31,7 +32,7 @@ public final class AuthServer {
     private AuthServer() {
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws IOException, SQLException {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/api/register", AuthServer::register);
@@ -96,10 +97,39 @@ public final class AuthServer {
     }
 
     private static Connection database() throws SQLException {
-        String url = required("DATABASE_URL");
-        if (url.startsWith("postgres://")) url = "jdbc:postgresql://" + url.substring("postgres://".length());
-        if (url.startsWith("postgresql://")) url = "jdbc:postgresql://" + url.substring("postgresql://".length());
-        return DriverManager.getConnection(url);
+        String databaseUrl = System.getenv("DATABASE_URL");
+        if (databaseUrl != null && !databaseUrl.isBlank()) {
+            URI databaseUri = URI.create(databaseUrl.trim());
+            if (!"postgres".equalsIgnoreCase(databaseUri.getScheme())
+                    && !"postgresql".equalsIgnoreCase(databaseUri.getScheme())) {
+                throw new IllegalStateException("DATABASE_URL must be a PostgreSQL connection URL");
+            }
+            String host = databaseUri.getHost();
+            String path = databaseUri.getPath();
+            if (host == null || path == null || path.length() < 2) {
+                throw new IllegalStateException("DATABASE_URL must include a database host and name");
+            }
+            Properties properties = new Properties();
+            String[] credentials = databaseUri.getUserInfo() == null
+                    ? new String[0]
+                    : databaseUri.getUserInfo().split(":", 2);
+            if (credentials.length == 2) {
+                properties.setProperty("user", credentials[0]);
+                properties.setProperty("password", credentials[1]);
+            }
+            properties.setProperty("sslmode", "require");
+            String port = databaseUri.getPort() > 0 ? ":" + databaseUri.getPort() : "";
+            return DriverManager.getConnection("jdbc:postgresql://" + host + port + path, properties);
+        }
+
+        Properties properties = new Properties();
+        properties.setProperty("user", required("PGUSER"));
+        properties.setProperty("password", required("PGPASSWORD"));
+        properties.setProperty("sslmode", "require");
+        String host = required("PGHOST");
+        String port = System.getenv().getOrDefault("PGPORT", "5432");
+        String database = required("PGDATABASE");
+        return DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/" + database, properties);
     }
 
     private static void initializeDatabase() throws SQLException {

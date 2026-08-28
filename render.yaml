@@ -1,11 +1,20 @@
 services:
   - type: web
     name: netchill
-    runtime: docker
+    runtime: static
     plan: free
-    dockerfilePath: ./Dockerfile
+    buildCommand: ""
+    staticPublishPath: .
     envVars:
       - key: PORT
-        value: "80"
+        value: "10000"
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: netchill-db
+          property: connectionString
+
+databases:
+  - name: netchill-db
+    databaseName: netchill
+    user: netchill
+    plan: free
