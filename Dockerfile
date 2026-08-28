@@ -1,12 +1,14 @@
 # Step 1: Use an official Python base image
 FROM python:3.11-slim
 
-# Step 2: Install Node.js and NPM
-RUN apt-get update && apt-get install -y \
-    curl \
-    && curl -fsSL https://nodesource.com | bash - \
-    && apt-get install -y nodejs \
+# Step 2: Install Node.js and NPM (Updated modern method)
+RUN apt-get update && apt-get install -y ca-certificates curl gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://nodesource.com | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://nodesource.com nodistro main" | tee /etc/apt/etc/apt/sources.list.d/nodesource.list \
+    && apt-get update && apt-get install nodejs -y \
     && rm -rf /var/lib/apt/lists/*
+
 
 # Step 3: Set up the working directory (This replaces your 'cd' command)
 WORKDIR /app
