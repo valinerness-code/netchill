@@ -1,10 +1,8 @@
 services:
   - type: web
     name: netchill
-    runtime: static
+    runtime: docker
     plan: free
-    buildCommand: ""
-    staticPublishPath: .
     envVars:
       - key: PORT
         value: "10000"

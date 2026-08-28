@@ -27,29 +27,29 @@ This application includes multiple layers of security protection:
 
 ## Local development
 
-### Option 1: Python static server
+### Local development
 
 ```bash
-cd /workspaces/netchill
-python3 -m http.server 8000
+cd netchill
+mvn -B package dependency:copy-dependencies -DincludeScope=runtime
+set DATABASE_URL=postgresql://user:password@localhost:5432/netchill
+java -cp "target/classes;target/dependency/*" AuthServer
 ```
 
 Then open:
 
 ```text
-http://localhost:8000
+http://localhost:8080
 ```
 
 ## Render deployment
 
 1. Push this project to a GitHub repository.
-2. On Render, click New + and choose Web Service.
+2. On Render, click New + and choose Blueprint.
 3. Connect your GitHub repo.
-4. Use the following settings:
-   - Runtime: Static Site
-   - Publish directory: `.`
-5. Click Create Static Site.
-6. Create a Render Postgres database named `netchill-db` for the database configuration in `render.yaml`.
+4. Apply the `render.yaml` blueprint.
+5. Render builds the Docker image, serves the webpages, and runs the `/api/login` and `/api/register` endpoints from the same service.
+6. The blueprint creates the `netchill-db` Postgres database and passes its connection string to the service.
 
 ### Render config
 
@@ -57,6 +57,5 @@ This repository includes a `render.yaml` file that configures the static site an
 
 ## Notes
 
-- This is a front-end demo project.
-- The sign-in form uses a `mailto:` workflow for demonstration purposes, so the user’s mail client opens with the entered email address and message.
+- The webpages and authentication API are served from the same Java process in production.
 - The home page is a static mock-up with a limited set of movie and TV titles.

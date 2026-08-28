@@ -1,14 +1,14 @@
-# Step 1: Use a lightweight Python base image
-FROM python:3.11-slim
-
-# Step 2: Set up the working directory inside the container
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
-
-# Step 3: Copy your project files into the container
 COPY . .
+RUN mvn -B package dependency:copy-dependencies -DincludeScope=runtime
 
-# Step 4: Expose the web traffic port Render expects
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /app/target/classes ./target/classes
+COPY --from=build /app/target/dependency ./target/dependency
+COPY --from=build /app/*.html ./
+COPY --from=build /app/*.css ./
+COPY --from=build /app/*.js ./
 EXPOSE 10000
-
-# Step 5: Start the Python HTTP web server on port 10000
-CMD ["python", "-m", "http.server", "10000"]
+CMD ["sh", "-c", "exec java -cp 'target/classes:target/dependency/*' AuthServer"]

@@ -4,9 +4,12 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -36,11 +39,41 @@ public final class AuthServer {
         int port = Integer.parseInt(System.getenv().getOrDefault("API_PORT",
             System.getenv().getOrDefault("PORT", "8080")));
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        server.createContext("/", AuthServer::staticFile);
         server.createContext("/api/register", AuthServer::register);
         server.createContext("/api/login", AuthServer::login);
         initializeDatabase();
         server.start();
         System.out.println("Auth API listening on port " + port);
+    }
+
+    private static void staticFile(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "GET");
+            respond(exchange, 405, "Method not allowed");
+            return;
+        }
+
+        String requestPath = exchange.getRequestURI().getPath();
+        String relativePath = "/".equals(requestPath) ? "index.html" : requestPath.substring(1);
+        File file = new File(relativePath).getCanonicalFile();
+        File root = new File(".").getCanonicalFile();
+
+        if (!file.toPath().startsWith(root.toPath()) || !file.isFile()) {
+            respond(exchange, 404, "Not found");
+            return;
+        }
+
+        String contentType = URLConnection.guessContentTypeFromName(file.getName());
+        if (contentType != null) {
+            exchange.getResponseHeaders().set("Content-Type", contentType);
+        }
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.sendResponseHeaders(200, file.length());
+        try (InputStream input = new FileInputStream(file);
+             OutputStream output = exchange.getResponseBody()) {
+            input.transferTo(output);
+        }
     }
 
     private static void register(HttpExchange exchange) throws IOException {
