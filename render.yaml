@@ -12,7 +12,6 @@ services:
         fromDatabase:
           name: netchill-db
           property: connectionString
-
 databases:
   - name: netchill-db
     databaseName: netchill
