@@ -1,11 +1,13 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://apache.org" xmlns:xsi="http://w3.org" xsi:schemaLocation="http://apache.org https://apache.org">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.netchill</groupId>
   <artifactId>netchill-auth</artifactId>
   <version>1.0.0</version>
+  
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
   </properties>
+
   <dependencies>
     <dependency>
       <groupId>org.postgresql</groupId>
@@ -13,8 +15,8 @@
       <version>42.7.4</version>
     </dependency>
   </dependencies>
+
   <build>
-    <sourceDirectory>${project.basedir}</sourceDirectory>
     <plugins>
       <plugin>
         <groupId>org.codehaus.mojo</groupId>

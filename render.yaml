@@ -1,15 +1,24 @@
 services:
   - type: web
-    name: netchill
+    name: netchill-backend
     runtime: docker
     plan: free
     envVars:
       - key: PORT
-        value: "10000"
+        value: "8080" # Standard port mapped inside your Java Dockerfile
       - key: DATABASE_URL
         fromDatabase:
           name: netchill-db
           property: connectionString
+  
+  - type: web
+    name: netchill-frontend
+    runtime: docker
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8501" # Port exposed inside your Streamlit Dockerfile
+
 databases:
   - name: netchill-db
     databaseName: netchill
