@@ -6,6 +6,7 @@ services:
     plan: free
     image:
       url: docker.io/netchillregistry.azurecr.io/netchill-frontend:latest
+      registryCredentialId: azure-acr-keys
     envVars:
       - key: PORT
         value: "8501"
@@ -17,9 +18,19 @@ services:
     plan: free
     image:
       url: docker.io/netchillregistry.azurecr.io/netchill-backend:latest
+      registryCredentialId: azure-acr-keys
     envVars:
       - key: PORT
         value: "8080"
-      # This tells Render to look for a secure secret variable in the UI dashboard instead of reading it from your code!
+      # Keeps the database variable active, but tells Render to collect the link from the UI
       - key: DATABASE_URL
-        sync: false 
+        sync: false
+
+# 3. Securely hooks Render into your private Azure Container Registry
+registryCredentials:
+  - id: azure-acr-keys
+    name: Azure ACR Credentials
+    username:
+      sync: false
+    password:
+      sync: false
