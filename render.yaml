@@ -1,26 +1,25 @@
 services:
-  - type: web
-    name: netchill-backend
-    runtime: docker
-    plan: free
-    envVars:
-      - key: PORT
-        value: "8080" # Standard port mapped inside your Java Dockerfile
-      - key: DATABASE_URL
-        fromDatabase:
-          name: netchill-db
-          property: connectionString
-  
+  # 1. Frontend Streamlit Web Service
   - type: web
     name: netchill-frontend
-    runtime: docker
+    runtime: image
     plan: free
+    image:
+      url: docker.io/netchillregistry.azurecr.io/netflix-frontend:latest
     envVars:
       - key: PORT
-        value: "8501" # Port exposed inside your Streamlit Dockerfile
+        value: "8501"
 
-databases:
-  - name: netchill-db
-    databaseName: netchill
-    user: netchill
+  # 2. Backend Java Web Service
+  - type: web
+    name: netchill-backend
+    runtime: image
     plan: free
+    image:
+      url: docker.io/netchillregistry.azurecr.io/netflix-backend:latest
+    envVars:
+      - key: PORT
+        value: "8080"
+      # This tells Render to look for a secure secret variable in the UI dashboard instead of reading it from your code!
+      - key: DATABASE_URL
+        sync: false 

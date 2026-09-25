@@ -1,4 +1,6 @@
-<project xmlns="http://apache.org" xmlns:xsi="http://w3.org" xsi:schemaLocation="http://apache.org https://apache.org">
+<project xmlns="http://apache.org" 
+         xmlns:xsi="http://w3.org" 
+         xsi:schemaLocation="http://apache.org https://apache.org">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.netchill</groupId>
   <artifactId>netchill-auth</artifactId>
@@ -6,6 +8,7 @@
   
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
   <dependencies>
@@ -18,13 +21,30 @@
 
   <build>
     <plugins>
+      <!-- Compiles all dependency objects directly into a single executable Fat JAR -->
       <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.5.0</version>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.7.1</version>
         <configuration>
-          <mainClass>AuthServer</mainClass>
+          <archive>
+            <manifest>
+              <mainClass>AuthServer</mainClass>
+            </manifest>
+          </archive>
+          <descriptorRefs>
+            <descriptorRef>jar-with-dependencies</descriptorRef>
+          </descriptorRefs>
         </configuration>
+        <executions>
+          <execution>
+            <id>make-assembly</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

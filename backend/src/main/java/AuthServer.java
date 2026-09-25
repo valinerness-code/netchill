@@ -1,4 +1,3 @@
-package backend.src.main.java;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -212,6 +211,12 @@ public final class AuthServer {
 
     private static void respond(HttpExchange exchange, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
+        
+        // Inject Essential Global CORS Metadata Elements
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        
         exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(status, body.length);
