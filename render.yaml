@@ -5,7 +5,7 @@ services:
     runtime: image
     plan: free
     image:
-      url: docker.io/netchillregistry.azurecr.io/netflix-frontend:latest
+      url: docker.io/netchillregistry.azurecr.io/netchill-frontend:latest
     envVars:
       - key: PORT
         value: "8501"
@@ -16,7 +16,7 @@ services:
     runtime: image
     plan: free
     image:
-      url: docker.io/netchillregistry.azurecr.io/netflix-backend:latest
+      url: docker.io/netchillregistry.azurecr.io/netchill-backend:latest
     envVars:
       - key: PORT
         value: "8080"
