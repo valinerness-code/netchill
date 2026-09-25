@@ -23,14 +23,14 @@ jobs:
       # Builds the frontend code and pushes the image to Azure
       - name: Build and Push Frontend Image
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/netflix-frontend:latest ./frontend
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/netflix-frontend:latest
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/netchill-frontend:latest ./frontend
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/netchill-frontend:latest
 
       # Builds the backend Java code and pushes the image to Azure
       - name: Build and Push Backend Image
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/netflix-backend:latest ./backend
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/netflix-backend:latest
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/netchill-backend:latest ./backend
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/netchill-backend:latest
 
       # Pings Render to look at Azure and update the website layout
       - name: Trigger Render Pull and Deployment
