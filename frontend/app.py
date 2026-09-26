@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import re
 import requests
@@ -7,11 +8,12 @@ import requests
 # =========================================================================
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
-# Target backend routing URL matching your standard Docker/Render ecosystem configurations
-# System drops down to internal docker networking if environment variables are left unbound.
+# Automatically extracts Render's environment variable, dropping down to localhost for local testing
+DEFAULT_API = os.getenv("BACKEND_API_URL", "http://localhost:8080").strip().rstrip("/")
+
 BACKEND_API_URL = st.sidebar.text_input(
     "API Routing Link (Internal Dev Only)", 
-    value="http://localhost:8080"
+    value=DEFAULT_API
 ).strip().rstrip("/")
 
 st.markdown("""
