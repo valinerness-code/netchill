@@ -9,12 +9,7 @@ import requests
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
 # Automatically extracts Render's environment variable, dropping down to localhost for local testing
-DEFAULT_API = os.getenv("BACKEND_API_URL", "http://localhost:8080").strip().rstrip("/")
-
-BACKEND_API_URL = st.sidebar.text_input(
-    "API Routing Link (Internal Dev Only)", 
-    value=DEFAULT_API
-).strip().rstrip("/")
+BACKEND_API_URL = "https://onrender.com"
 
 st.markdown("""
     <style>
