@@ -9,7 +9,7 @@ import requests
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
-BACKEND_API_URL = "https://netchill-backend.onrender.com"
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
 # 1. Official, active Unsplash link that generates a random, high-res photo from specified categories
 BACKGROUND_IMAGE_URL = "https://unsplash.com"
