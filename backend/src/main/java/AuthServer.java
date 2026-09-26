@@ -100,20 +100,47 @@ public final class AuthServer {
         Map<String, String> data = parseForm(exchange);
         String email = data.getOrDefault("email", "").trim().toLowerCase();
         String password = data.getOrDefault("password", "");
+        String firstName = data.getOrDefault("first_name", "").trim();
+        String lastName = data.getOrDefault("last_name", "").trim();
+        String dobRaw = data.getOrDefault("date_of_birth", "").trim();
 
         if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$") || password.length() < 6 || password.length() > 128) {
             respond(exchange, 400, "Invalid email or password");
             return;
+        }
+        if (firstName.isEmpty() || lastName.isEmpty()) {
+            respond(exchange, 400, "First and last name are required");
+            return;
+        }
+
+        // Date of birth is treated as optional at the database level (nullable
+        // column) so a missing/malformed value never blocks account creation --
+        // only credentials are actually required to register.
+        java.sql.Date dob = null;
+        if (!dobRaw.isEmpty()) {
+            try {
+                dob = java.sql.Date.valueOf(dobRaw); // expects yyyy-MM-dd, matching Python's date.isoformat()
+            } catch (IllegalArgumentException ignored) {
+                dob = null;
+            }
         }
 
         byte[] salt = new byte[16];
         RANDOM.nextBytes(salt);
         try (Connection connection = database();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT INTO users (email, password_hash, password_salt) VALUES (?, ?, ?)")) {
+                     "INSERT INTO users (email, password_hash, password_salt, first_name, last_name, date_of_birth) "
+                             + "VALUES (?, ?, ?, ?, ?, ?)")) {
             statement.setString(1, email);
             statement.setString(2, hash(password, salt));
             statement.setBytes(3, salt);
+            statement.setString(4, firstName);
+            statement.setString(5, lastName);
+            if (dob != null) {
+                statement.setDate(6, dob);
+            } else {
+                statement.setNull(6, java.sql.Types.DATE);
+            }
             statement.executeUpdate();
             respond(exchange, 201, "Account created");
         } catch (SQLException error) {
@@ -186,10 +213,21 @@ public final class AuthServer {
     }
 
     private static void initializeDatabase() throws SQLException {
-        try (Connection connection = database();
-             PreparedStatement statement = connection.prepareStatement(
-                     "CREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash TEXT NOT NULL, password_salt BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")) {
-            statement.executeUpdate();
+        try (Connection connection = database()) {
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "CREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash TEXT NOT NULL, password_salt BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")) {
+                statement.executeUpdate();
+            }
+            // Added after the original table was already deployed, so these are applied
+            // as an idempotent migration (safe to run on every startup, including against
+            // a table that already has these columns or already has existing rows).
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "ALTER TABLE users "
+                            + "ADD COLUMN IF NOT EXISTS first_name VARCHAR(100), "
+                            + "ADD COLUMN IF NOT EXISTS last_name VARCHAR(100), "
+                            + "ADD COLUMN IF NOT EXISTS date_of_birth DATE")) {
+                statement.executeUpdate();
+            }
         }
     }
 

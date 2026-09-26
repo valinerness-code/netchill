@@ -4,6 +4,7 @@ import hashlib
 import streamlit as st
 import re
 import requests
+from datetime import date
 
 # =========================================================================
 # 1. SETUP & UTILITY HOOKS
@@ -166,6 +167,14 @@ if "user_email" not in st.session_state:
     st.session_state.user_email = ""
 if "signup_email" not in st.session_state:
     st.session_state.signup_email = ""
+if "signup_step" not in st.session_state:
+    st.session_state.signup_step = None  # None -> "info" -> "plan"
+if "signup_first_name" not in st.session_state:
+    st.session_state.signup_first_name = ""
+if "signup_last_name" not in st.session_state:
+    st.session_state.signup_last_name = ""
+if "signup_dob" not in st.session_state:
+    st.session_state.signup_dob = None
 if "current_profile" not in st.session_state:
     st.session_state.current_profile = "Alex"
 if "profile_color" not in st.session_state:
@@ -178,6 +187,10 @@ def sign_out_action():
     st.session_state.user_email = ""
     st.session_state.current_profile = "Alex"
     st.session_state.profile_color = "amber"
+    st.session_state.signup_step = None
+    st.session_state.signup_first_name = ""
+    st.session_state.signup_last_name = ""
+    st.session_state.signup_dob = None
     st.success("Successfully logged out.")
     st.rerun()
 
@@ -212,10 +225,35 @@ def show_login_dialog():
             except Exception as e:
                 st.error(f"Cannot link to target API service container at {BACKEND_API_URL}. Details: {e}")
 
+@st.dialog("Tell Us About You")
+def show_personal_info_dialog():
+    """Step 1 of signup: collect profile basics, Netflix-style. No payment info here or ever."""
+    st.write(f"Almost there, **{st.session_state.signup_email}**. Just a little more about you.")
+    first_name = st.text_input("First name", value=st.session_state.signup_first_name)
+    last_name = st.text_input("Last name", value=st.session_state.signup_last_name)
+    dob = st.date_input(
+        "Date of birth",
+        value=st.session_state.signup_dob or date(2000, 1, 1),
+        min_value=date(1900, 1, 1),
+        max_value=date.today(),
+    )
+
+    if st.button("Continue", use_container_width=True, type="primary"):
+        if not first_name.strip() or not last_name.strip():
+            st.error("Please enter your first and last name.")
+        else:
+            st.session_state.signup_first_name = first_name.strip()
+            st.session_state.signup_last_name = last_name.strip()
+            st.session_state.signup_dob = dob
+            st.session_state.signup_step = "plan"
+            st.rerun()
+
 @st.dialog("Start Your Membership")
 def show_registration_dialog():
-    """Form-encodes new metrics to construct databases via Java api/register endpoint"""
-    st.write("Choose your plan and establish account credentials.")
+    """Step 2 of signup: plan + password. Form-encodes everything, including the
+    name/DOB collected in step 1, to the Java api/register endpoint. Deliberately
+    no credit card / payment fields -- membership stays fake past this point."""
+    st.write(f"Hi **{st.session_state.signup_first_name}** — choose your plan and set a password.")
     plan = st.radio("Choose your plan", ["Basic - $8.99/mo", "Standard - $15.49/mo", "Premium - $22.99/mo"], index=2)
     email = st.text_input("Email address", value=st.session_state.signup_email).strip().lower()
     password = st.text_input("Create Password", type="password")
@@ -227,13 +265,20 @@ def show_registration_dialog():
             st.error("Password must be between 6 and 128 characters.")
         else:
             try:
-                payload = {"email": email, "password": password}
+                payload = {
+                    "email": email,
+                    "password": password,
+                    "first_name": st.session_state.signup_first_name,
+                    "last_name": st.session_state.signup_last_name,
+                    "date_of_birth": st.session_state.signup_dob.isoformat() if st.session_state.signup_dob else "",
+                }
                 response = requests.post(f"{BACKEND_API_URL}/api/register", data=payload)
 
                 if response.status_code == 201:
                     st.session_state.user_email = email
                     st.session_state.logged_in = True
                     st.session_state.signup_email = ""
+                    st.session_state.signup_step = None
                     st.success("Account created successfully!")
                     st.rerun()
                 else:
@@ -246,6 +291,14 @@ def show_registration_dialog():
 # =========================================================================
 
 def landing_page():
+    # Re-open whichever signup step is in progress. This runs on every rerun
+    # while a step is active, so clicking "Continue" inside step 1 (which sets
+    # signup_step = "plan" and reruns) automatically opens step 2 next.
+    if st.session_state.signup_step == "info":
+        show_personal_info_dialog()
+    elif st.session_state.signup_step == "plan":
+        show_registration_dialog()
+
     nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
         st.markdown('<div class="brand-title">NETCHILL</div>', unsafe_allow_html=True)
@@ -269,7 +322,8 @@ def landing_page():
                 st.error("Please enter a valid email address.")
             else:
                 st.session_state.signup_email = clean_email
-                show_registration_dialog()
+                st.session_state.signup_step = "info"
+                st.rerun()
 
 def dashboard_page():
     view_selection = st.radio("Filter Content Matrix", ["Home", "Series", "Movies"], horizontal=True, label_visibility="collapsed")
