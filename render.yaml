@@ -10,6 +10,8 @@ services:
     envVars:
       - key: PORT
         value: "8501"
+      - key: BACKEND_API_URL
+        value: https://netchill-backend.onrender.com
 
   # 2. Backend Java Web Service
   - type: web
