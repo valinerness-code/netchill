@@ -5,11 +5,8 @@ services:
     runtime: image
     plan: free
     image:
-      url: netchillregistry.azurecr.io/netchill-frontend:latest
-      # Uses Render's exact specification structure to map private workspace keys
-      creds:
-        fromRegistryCreds:
-          name: azure-acr-keys
+      # Render automatically links to your public Docker Hub repositories without any credentials!
+      url: docker.io/valinerness/netchill-frontend:latest
     envVars:
       - key: PORT
         value: "8501"
@@ -20,12 +17,9 @@ services:
     runtime: image
     plan: free
     image:
-      url: netchillregistry.azurecr.io/netchill-backend:latest
-      creds:
-        fromRegistryCreds:
-          name: azure-acr-keys
+      url: docker.io/valinerness/netchill-backend:latest
     envVars:
       - key: PORT
         value: "8080"
       - key: DATABASE_URL
-        sync: false 
+        sync: 
