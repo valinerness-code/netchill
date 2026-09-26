@@ -61,6 +61,9 @@ def build_hero_mosaic_css(cols: int = 7, rows: int = 5) -> str:
         "        background-repeat: no-repeat;"
     )
 
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
 HERO_BACKGROUND_CSS = build_hero_mosaic_css()
 
 def poster_card_html(title: str, genre: str = "Drama", rating: str = None, height: int = 260) -> str:
@@ -186,8 +189,6 @@ st.markdown(f"""
     unsafe_allow_html=True
 )
 
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
 if "user_email" not in st.session_state:
     st.session_state.user_email = ""
 if "signup_email" not in st.session_state:
