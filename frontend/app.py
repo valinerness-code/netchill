@@ -14,14 +14,13 @@ st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", pag
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
-# 1. Random background image on every refresh, using Lorem Picsum (source.unsplash.com's
-#    old random-redirect endpoint was shut down, so we use a service that still returns
-#    a real image directly). A random seed + cache-busting query param guarantees a new
-#    photo each time the script reruns (e.g. on every page refresh or interaction).
+# 1. Netflix-style hero background: a mosaic wall of poster-colored tiles behind
+#    a dark scrim, instead of a single random stock photo (which reads as generic
+#    stock art rather than "streaming service"). Built with pure CSS -- a grid of
+#    gradients tiled via multiple background layers -- so no external image is
+#    needed. A random seed picks a fresh arrangement each session/refresh.
 if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
-
-BACKGROUND_IMAGE_URL = f"https://picsum.photos/seed/{st.session_state.bg_seed}/1920/1080"
 
 # ---- Poster-card generator ---------------------------------------------
 # There's no free API for real (licensed) movie-poster art, and pulling actual
@@ -39,6 +38,30 @@ _PALETTES = [
 def _poster_palette(title: str):
     idx = int(hashlib.md5(title.encode()).hexdigest(), 16) % len(_PALETTES)
     return _PALETTES[idx]
+
+def build_hero_mosaic_css(cols: int = 7, rows: int = 5) -> str:
+    """Builds a CSS `background` value that tiles a grid of poster-gradient
+    rectangles edge-to-edge behind a dark scrim, using the classic
+    multiple-background-layers technique (percentage position matched to
+    percentage size tiles them without gaps)."""
+    rng = random.Random(st.session_state.bg_seed)
+    images = ["linear-gradient(rgba(0,0,0,0.72), rgba(0,0,0,0.72))"]
+    positions = ["center"]
+    sizes = ["cover"]
+    for r in range(rows):
+        for c in range(cols):
+            c1, c2 = rng.choice(_PALETTES)
+            images.append(f"linear-gradient(135deg, {c1} 0%, {c2} 100%)")
+            positions.append(f"{c * 100 / (cols - 1):.3f}% {r * 100 / (rows - 1):.3f}%")
+            sizes.append(f"{100 / cols:.4f}% {100 / rows:.4f}%")
+    return (
+        "background-image: " + ", ".join(images) + ";\n"
+        "        background-position: " + ", ".join(positions) + ";\n"
+        "        background-size: " + ", ".join(sizes) + ";\n"
+        "        background-repeat: no-repeat;"
+    )
+
+HERO_BACKGROUND_CSS = build_hero_mosaic_css()
 
 def poster_card_html(title: str, genre: str = "Drama", rating: str = None, height: int = 260) -> str:
     c1, c2 = _poster_palette(title)
@@ -86,10 +109,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
 st.markdown(f"""
     <style>
     .stApp {{ 
-        background: linear-gradient(rgba(0, 0, 0, 0.70), rgba(0, 0, 0, 0.70)), url("{BACKGROUND_IMAGE_URL}");
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
+        {HERO_BACKGROUND_CSS if not st.session_state.logged_in else "background: #0b0b0f;"}
         background-attachment: fixed;
         color: #FFFFFF; 
         font-family: 'Inter', sans-serif; 
@@ -126,8 +146,13 @@ st.markdown(f"""
         background-color: #E50914 !important; color: white !important;
         border: none !important; padding: 0.5rem 1.5rem !important;
         font-weight: 600 !important; border-radius: 4px !important;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
     }}
-    button[kind="primary"]:hover {{ background-color: #B81D24 !important; }}
+    button[kind="primary"]:hover {{
+        background-color: #B81D24 !important;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(229,9,20,0.45);
+    }}
 
     /* Row-action chips (Play / Watch Episode / Activate / Sign Out) -- slim ghost pills */
     button[kind="secondary"] {{
@@ -218,6 +243,10 @@ def show_login_dialog():
                 if response.status_code == 200:
                     st.session_state.user_email = email
                     st.session_state.logged_in = True
+                    try:
+                        st.session_state.current_profile = response.json().get("first_name", "Member")
+                    except ValueError:
+                        st.session_state.current_profile = "Member"
                     st.success("Signed in successfully!")
                     st.rerun()
                 else:
@@ -277,6 +306,7 @@ def show_registration_dialog():
                 if response.status_code == 201:
                     st.session_state.user_email = email
                     st.session_state.logged_in = True
+                    st.session_state.current_profile = st.session_state.signup_first_name
                     st.session_state.signup_email = ""
                     st.session_state.signup_step = None
                     st.success("Account created successfully!")

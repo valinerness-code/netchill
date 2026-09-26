@@ -161,11 +161,19 @@ public final class AuthServer {
 
         try (Connection connection = database();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT password_hash, password_salt FROM users WHERE email = ?")) {
+                     "SELECT password_hash, password_salt, first_name FROM users WHERE email = ?")) {
             statement.setString(1, email);
             try (ResultSet result = statement.executeQuery()) {
                 if (result.next() && hash(password, result.getBytes("password_salt")).equals(result.getString("password_hash"))) {
-                    respond(exchange, 200, "Signed in");
+                    String firstName = result.getString("first_name");
+                    if (firstName == null || firstName.isBlank()) {
+                        // Accounts created before the name fields existed (or with a blank
+                        // value) fall back to something readable instead of a blank name.
+                        String localPart = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+                        firstName = localPart.isEmpty() ? "Member" : Character.toUpperCase(localPart.charAt(0)) + localPart.substring(1);
+                    }
+                    String json = "{\"message\":\"Signed in\",\"first_name\":\"" + jsonEscape(firstName) + "\"}";
+                    respondJson(exchange, 200, json);
                 } else {
                     respond(exchange, 401, "Invalid email or password");
                 }
@@ -267,14 +275,20 @@ public final class AuthServer {
     }
 
     private static void respond(HttpExchange exchange, int status, String message) throws IOException {
-        byte[] body = message.getBytes(StandardCharsets.UTF_8);
+        writeResponse(exchange, status, "text/plain; charset=UTF-8", message.getBytes(StandardCharsets.UTF_8));
+    }
 
+    private static void respondJson(HttpExchange exchange, int status, String json) throws IOException {
+        writeResponse(exchange, status, "application/json; charset=UTF-8", json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void writeResponse(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
         // Inject Essential Global CORS Metadata Elements
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
+        exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
 
         // HEAD requests (e.g. Render's health check pinging "/") must carry the
@@ -292,5 +306,14 @@ public final class AuthServer {
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(body);
         }
+    }
+
+    /** Minimal JSON string escaping -- good enough for names/emails, not a general-purpose encoder. */
+    private static String jsonEscape(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }
