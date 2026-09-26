@@ -5,7 +5,7 @@ services:
     runtime: image
     plan: free
     image:
-      url: docker.io/netchillregistry.azurecr.io/netchill-frontend:latest
+      url: netchillregistry.azurecr.io/netchill-frontend:latest
       # Connects this service directly to the credentials you saved in the dashboard
       creds:
         fromRegistryCreds:
@@ -20,7 +20,7 @@ services:
     runtime: image
     plan: free
     image:
-      url: docker.io/netchillregistry.azurecr.io/netchill-backend:latest
+      url: netchillregistry.azurecr.io/netchill-backend:latest
       # Connects this service directly to the credentials you saved in the dashboard
       creds:
         fromRegistryCreds:
