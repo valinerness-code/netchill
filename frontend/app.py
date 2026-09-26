@@ -11,23 +11,37 @@ st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", pag
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
-st.markdown("""
+# 1. Official, active Unsplash link that generates a random, high-res photo from specified categories
+BACKGROUND_IMAGE_URL = "https://unsplash.com"
+
+# 2. Re-injecting your custom theme while adding the dynamic cloud background layers
+st.markdown(f"""
     <style>
-    .stApp { background-color: #141414; color: #FFFFFF; font-family: 'Inter', sans-serif; }
-    hr { border-color: #333; }
-    .brand-title { color: #E50914 !important; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; }
-    .hero-title { font-size: 3.5rem; font-weight: 800; line-height: 1.1; margin-bottom: 10px; color: #FFFFFF; }
-    .section-title { font-size: 1.8rem; font-weight: 700; margin-top: 20px; margin-bottom: 15px; color: #fff; }
-    .profile-card { text-align: center; background: #222; padding: 25px; border-radius: 8px; border: 2px solid transparent; }
-    .profile-card:hover { border-color: #E50914; }
-    div.stButton > button {
+    .stApp {{ 
+        background: linear-gradient(rgba(0, 0, 0, 0.70), rgba(0, 0, 0, 0.70)), url("{BACKGROUND_IMAGE_URL}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+        color: #FFFFFF; 
+        font-family: 'Inter', sans-serif; 
+    }}
+    hr {{ border-color: #333; }}
+    .brand-title {{ color: #E50914 !important; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; }}
+    .hero-title {{ font-size: 3.5rem; font-weight: 800; line-height: 1.1; margin-bottom: 10px; color: #FFF; }}
+    .section-title {{ font-size: 1.8rem; font-weight: 700; margin-top: 20px; margin-bottom: 15px; color: #FFF; }}
+    .profile-card {{ text-align: center; background: #222; padding: 25px; border-radius: 8px; border: 2px solid #333; }}
+    .profile-card:hover {{ border-color: #E50914; }}
+    div.stButton > button {{
         background-color: #E50914 !important; color: white !important;
         border: none !important; padding: 0.5rem 1.5rem !important;
         font-weight: 600 !important; border-radius: 4px !important;
-    }
-    div.stButton > button:hover { background-color: #B81D24 !important; }
+    }}
+    div.stButton > button:hover {{ background-color: #B81D24 !important; }}
     </style>
-""", unsafe_allow_html=True)
+    """, 
+    unsafe_allow_html=True
+)
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
