@@ -48,8 +48,10 @@ public final class AuthServer {
     }
 
     private static void staticFile(HttpExchange exchange) throws IOException {
-        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            exchange.getResponseHeaders().set("Allow", "GET");
+        String method = exchange.getRequestMethod();
+        boolean isHead = "HEAD".equalsIgnoreCase(method);
+        if (!"GET".equalsIgnoreCase(method) && !isHead) {
+            exchange.getResponseHeaders().set("Allow", "GET, HEAD");
             respond(exchange, 405, "Method not allowed");
             return;
         }
@@ -60,6 +62,15 @@ public final class AuthServer {
         File root = new File(".").getCanonicalFile();
 
         if (!file.toPath().startsWith(root.toPath()) || !file.isFile()) {
+            // No index.html on disk (this backend has no bundled frontend) -- still
+            // return 200 with no body for a HEAD health check on "/" specifically,
+            // so platform health checks see a healthy status rather than a 404.
+            if (isHead && "/".equals(requestPath)) {
+                exchange.getResponseHeaders().set("Content-Length", "0");
+                exchange.sendResponseHeaders(200, -1);
+                exchange.close();
+                return;
+            }
             respond(exchange, 404, "Not found");
             return;
         }
@@ -69,6 +80,14 @@ public final class AuthServer {
             exchange.getResponseHeaders().set("Content-Type", contentType);
         }
         exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+
+        if (isHead) {
+            exchange.getResponseHeaders().set("Content-Length", String.valueOf(file.length()));
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+            return;
+        }
+
         exchange.sendResponseHeaders(200, file.length());
         try (InputStream input = new FileInputStream(file);
              OutputStream output = exchange.getResponseBody()) {
@@ -211,14 +230,26 @@ public final class AuthServer {
 
     private static void respond(HttpExchange exchange, int status, String message) throws IOException {
         byte[] body = message.getBytes(StandardCharsets.UTF_8);
-        
+
         // Inject Essential Global CORS Metadata Elements
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        
+
         exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
+
+        // HEAD requests (e.g. Render's health check pinging "/") must carry the
+        // same Content-Length a GET would return, but no body. Passing the real
+        // body length to sendResponseHeaders on a HEAD request triggers a JDK
+        // warning, so we set Content-Length manually and send -1 (no body) instead.
+        if ("HEAD".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Content-Length", String.valueOf(body.length));
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+            return;
+        }
+
         exchange.sendResponseHeaders(status, body.length);
         try (OutputStream output = exchange.getResponseBody()) {
             output.write(body);
