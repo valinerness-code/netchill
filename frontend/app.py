@@ -6,6 +6,15 @@ import re
 import requests
 from datetime import date
 
+def _flatten_html(html: str) -> str:
+    """Collapses all whitespace runs (including newlines/indentation) down to
+    single spaces. HTML rendering here doesn't depend on whitespace, but
+    Streamlit's markdown pre-processor can misread heavily-indented, multi-line
+    content (e.g. a `style="..."` attribute split across lines) as an indented
+    code block and render it as literal text instead of passing it through as
+    HTML -- flattening avoids that entirely."""
+    return re.sub(r"\s+", " ", html).strip()
+
 # =========================================================================
 # 1. SETUP & UTILITY HOOKS
 # =========================================================================
@@ -75,7 +84,7 @@ def build_hero_poster_wall_html(cols: int = 7, rows: int = 5) -> str:
                 ">{title}</span>
             </div>
         """)
-    return f"""
+    result = f"""
     <div style="
         position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-2;
         display:grid; grid-template-columns:repeat({cols}, 1fr); grid-template-rows:repeat({rows}, 1fr);
@@ -86,6 +95,7 @@ def build_hero_poster_wall_html(cols: int = 7, rows: int = 5) -> str:
         background: rgba(0,0,0,0.55);
     "></div>
     """
+    return _flatten_html(result)
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -97,7 +107,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     words = title.split()
     big = words[0]
     rest = " ".join(words[1:])
-    return f"""
+    result = f"""
     <div class="poster-tile" style="
         position:relative; height:{height}px; border-radius:10px; overflow:hidden;
         background: linear-gradient(155deg, {c1} 0%, {c2} 100%);
@@ -131,6 +141,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
             border-radius:2px;"></div>
     </div>
     """
+    return _flatten_html(result)
 
 # 2. Base theme. The actual hero background (a wall of poster tiles) is real
 #    HTML rendered separately in landing_page(), fixed behind the content via
