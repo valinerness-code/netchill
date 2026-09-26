@@ -8,8 +8,8 @@ import requests
 # =========================================================================
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
-# Automatically extracts Render's environment variable, dropping down to localhost for local testing
-BACKEND_API_URL = "https://onrender.com"
+# Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
 st.markdown("""
     <style>
@@ -115,7 +115,7 @@ def show_registration_dialog():
 # =========================================================================
 
 def landing_page():
-    nav_col1, nav_col2 = st.columns()
+    nav_col1, nav_col2 = st.columns(2)
     with nav_col1:
         st.markdown('<div class="brand-title">NETCHILL</div>', unsafe_allow_html=True)
     with nav_col2:
@@ -128,7 +128,7 @@ def landing_page():
     st.markdown('<h5>Watch anywhere. Cancel anytime.</h5>', unsafe_allow_html=True)
     
     st.write("")
-    col_em, col_btn = st.columns()
+    col_em, col_btn = st.columns(2)
     with col_em:
         hero_email = st.text_input("Email address", placeholder="Email address", label_visibility="collapsed", key="hero_email_input")
     with col_btn:
@@ -198,3 +198,26 @@ def account_page():
 
 def help_page():
     st.markdown('<div class="section-title">Help Center Assistance Dashboard</div>', unsafe_allow_html=True)
+    st.write("For account or playback support, contact NETCHILL customer service.")
+
+def run_app():
+    if not st.session_state.logged_in:
+        landing_page()
+        return
+
+    with st.sidebar:
+        st.markdown('<div class="brand-title">NETCHILL</div>', unsafe_allow_html=True)
+        page = st.radio("Navigation", ["Browse", "Profiles", "Account", "Help"])
+        st.caption(st.session_state.user_email)
+        if st.button("Sign Out", use_container_width=True):
+            sign_out_action()
+
+    pages = {
+        "Browse": dashboard_page,
+        "Profiles": manage_profiles_page,
+        "Account": account_page,
+        "Help": help_page,
+    }
+    pages[page]()
+
+run_app()
