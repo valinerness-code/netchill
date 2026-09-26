@@ -6,8 +6,10 @@ services:
     plan: free
     image:
       url: netchillregistry.azurecr.io/netchill-frontend:latest
-      # Point directly to the credentials block matching Render specification rules
-      registryCredentialId: azure-acr-keys
+      # Uses Render's exact specification structure to map private workspace keys
+      creds:
+        fromRegistryCreds:
+          name: azure-acr-keys
     envVars:
       - key: PORT
         value: "8501"
@@ -19,18 +21,11 @@ services:
     plan: free
     image:
       url: netchillregistry.azurecr.io/netchill-backend:latest
-      registryCredentialId: azure-acr-keys
+      creds:
+        fromRegistryCreds:
+          name: azure-acr-keys
     envVars:
       - key: PORT
         value: "8080"
       - key: DATABASE_URL
-        sync: false # Safely prompts you inside Render for your Aiven URL string
-
-# This must sit at the bottom level, spelled exactly as shown to create dashboard fields
-registryCredentials:
-  - id: azure-acr-keys
-    name: azure-acr-keys
-    username:
-      sync: false
-    password:
-      sync: false
+        sync: false 
