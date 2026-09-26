@@ -14,11 +14,11 @@ st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", pag
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
-# 1. Netflix-style hero background: a mosaic wall of poster-colored tiles behind
-#    a dark scrim, instead of a single random stock photo (which reads as generic
-#    stock art rather than "streaming service"). Built with pure CSS -- a grid of
-#    gradients tiled via multiple background layers -- so no external image is
-#    needed. A random seed picks a fresh arrangement each session/refresh.
+# 1. Netflix-style hero background: a wall of poster-look tiles (each with its
+#    own generated title, like real content thumbnails) behind a dark scrim,
+#    instead of a single random stock photo or plain color blocks. Rendered as
+#    real HTML fixed behind the page content -- CSS `background` alone can't
+#    draw text, which is why an earlier version looked like blank color swatches.
 if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
 
@@ -35,36 +35,60 @@ _PALETTES = [
     ("#141e30", "#243b55"), ("#5f2c82", "#49a09d"), ("#642b73", "#c6426e"),
 ]
 
+_TITLE_WORDS_A = [
+    "Midnight", "Crimson", "Neon", "Silent", "Glass", "Shadow", "Golden", "Iron",
+    "Velvet", "Echo", "Emerald", "Obsidian", "Scarlet", "Frozen", "Electric", "Hollow",
+]
+_TITLE_WORDS_B = [
+    "Run", "Tide", "Glow", "City", "Ridge", "Lane", "Static", "Horizon",
+    "Drift", "Reign", "Pulse", "Harbor", "Rebellion", "Protocol", "Ascension", "Nightfall",
+]
+
 def _poster_palette(title: str):
     idx = int(hashlib.md5(title.encode()).hexdigest(), 16) % len(_PALETTES)
     return _PALETTES[idx]
 
-def build_hero_mosaic_css(cols: int = 7, rows: int = 5) -> str:
-    """Builds a CSS `background` value that tiles a grid of poster-gradient
-    rectangles edge-to-edge behind a dark scrim, using the classic
-    multiple-background-layers technique (percentage position matched to
-    percentage size tiles them without gaps)."""
+def build_hero_poster_wall_html(cols: int = 7, rows: int = 5) -> str:
+    """Renders a fixed, full-viewport grid of poster-style tiles (gradient +
+    generated title) behind a dark scrim, sitting behind all page content via
+    z-index. A random seed picks a fresh set of titles/colors each session."""
     rng = random.Random(st.session_state.bg_seed)
-    images = ["linear-gradient(rgba(0,0,0,0.72), rgba(0,0,0,0.72))"]
-    positions = ["center"]
-    sizes = ["cover"]
-    for r in range(rows):
-        for c in range(cols):
-            c1, c2 = rng.choice(_PALETTES)
-            images.append(f"linear-gradient(135deg, {c1} 0%, {c2} 100%)")
-            positions.append(f"{c * 100 / (cols - 1):.3f}% {r * 100 / (rows - 1):.3f}%")
-            sizes.append(f"{100 / cols:.4f}% {100 / rows:.4f}%")
-    return (
-        "background-image: " + ", ".join(images) + ";\n"
-        "        background-position: " + ", ".join(positions) + ";\n"
-        "        background-size: " + ", ".join(sizes) + ";\n"
-        "        background-repeat: no-repeat;"
-    )
+    tiles = []
+    for _ in range(cols * rows):
+        title = f"{rng.choice(_TITLE_WORDS_A)} {rng.choice(_TITLE_WORDS_B)}"
+        c1, c2 = rng.choice(_PALETTES)
+        tiles.append(f"""
+            <div style="
+                background: linear-gradient(155deg, {c1} 0%, {c2} 100%);
+                position: relative; overflow: hidden;
+                display:flex; align-items:flex-end; padding:10px; box-sizing:border-box;
+            ">
+                <div style="
+                    position:absolute; inset:0;
+                    background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0) 55%);
+                "></div>
+                <span style="
+                    position:relative; font-family: Georgia, 'Times New Roman', serif;
+                    font-weight:800; color:#fff; font-size:0.85rem; line-height:1.15;
+                    text-transform:uppercase; letter-spacing:0.5px;
+                    text-shadow:0 2px 6px rgba(0,0,0,0.75);
+                ">{title}</span>
+            </div>
+        """)
+    return f"""
+    <div style="
+        position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-2;
+        display:grid; grid-template-columns:repeat({cols}, 1fr); grid-template-rows:repeat({rows}, 1fr);
+        overflow:hidden;
+    ">{''.join(tiles)}</div>
+    <div style="
+        position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-1;
+        background: rgba(0,0,0,0.55);
+    "></div>
+    """
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-
-HERO_BACKGROUND_CSS = build_hero_mosaic_css()
 
 def poster_card_html(title: str, genre: str = "Drama", rating: str = None, height: int = 260) -> str:
     c1, c2 = _poster_palette(title)
@@ -108,12 +132,15 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     </div>
     """
 
-# 2. Re-injecting your custom theme while adding the dynamic cloud background layers
+# 2. Base theme. The actual hero background (a wall of poster tiles) is real
+#    HTML rendered separately in landing_page(), fixed behind the content via
+#    z-index -- CSS alone can't draw the title text on each tile. .stApp stays
+#    transparent so that shows through; html/body keep a dark fallback color.
 st.markdown(f"""
     <style>
+    html, body {{ background: #0b0b0f; }}
     .stApp {{ 
-        {HERO_BACKGROUND_CSS if not st.session_state.logged_in else "background: #0b0b0f;"}
-        background-attachment: fixed;
+        background: transparent !important;
         color: #FFFFFF; 
         font-family: 'Inter', sans-serif; 
     }}
@@ -322,6 +349,8 @@ def show_registration_dialog():
 # =========================================================================
 
 def landing_page():
+    st.markdown(build_hero_poster_wall_html(), unsafe_allow_html=True)
+
     # Re-open whichever signup step is in progress. This runs on every rerun
     # while a step is active, so clicking "Continue" inside step 1 (which sets
     # signup_step = "plan" and reruns) automatically opens step 2 next.
