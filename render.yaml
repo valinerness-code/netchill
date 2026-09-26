@@ -1,30 +1,24 @@
+registryCredential:
+  fromRegistryCreds:
+    name: azure-acr-keys # References the DOCKER key name saved in your dashboard settings
+
+# 2. ISOLATED PRODUCTION SERVICES PROFILES
 services:
-  # 1. Frontend Streamlit Web Service
+  # Frontend Web Container Configuration
   - type: web
     name: netchill-frontend
     runtime: image
     plan: free
     image:
-      url: netchillregistry.azurecr.io/netchill-frontend:latest
-      # Connects this service directly to the credentials you saved in the dashboard
-      creds:
-        fromRegistryCreds:
-          name: azure-acr-keys
-    envVars:
-      - key: PORT
-        value: "8501"
+      url: netchillregistry.azurecr.io/netchill-frontend:latest # Starts directly with your Azure domain
 
-  # 2. Backend Java Web Service
+  # Backend Web Container Configuration
   - type: web
     name: netchill-backend
     runtime: image
     plan: free
     image:
       url: netchillregistry.azurecr.io/netchill-backend:latest
-      # Connects this service directly to the credentials you saved in the dashboard
-      creds:
-        fromRegistryCreds:
-          name: azure-acr-keys
     envVars:
       - key: PORT
         value: "8080"
