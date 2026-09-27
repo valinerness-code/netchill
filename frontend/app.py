@@ -147,6 +147,13 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
 #    HTML rendered separately in landing_page(), fixed behind the content via
 #    z-index -- CSS alone can't draw the title text on each tile. .stApp stays
 #    transparent so that shows through; html/body keep a dark fallback color.
+#
+#    Getting the poster wall to sit BEHIND Streamlit's own content (rather than
+#    tangled up with it) needs more than a negative z-index on our own div --
+#    Streamlit wraps everything it renders in a container with the stable
+#    internal id `stAppViewContainer`. Explicitly giving THAT container a
+#    higher z-index establishes a clear, reliable stacking order regardless of
+#    where our injected markdown div ends up in the DOM.
 st.markdown(f"""
     <style>
     html, body {{ background: #0b0b0f; }}
@@ -154,6 +161,14 @@ st.markdown(f"""
         background: transparent !important;
         color: #FFFFFF; 
         font-family: 'Inter', sans-serif; 
+    }}
+    [data-testid="stAppViewContainer"] {{
+        position: relative;
+        z-index: 1;
+        background: transparent !important;
+    }}
+    [data-testid="stHeader"] {{
+        background: transparent !important;
     }}
     hr {{ border-color: #333; }}
     .brand-title {{ color: #E50914 !important; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; }}
