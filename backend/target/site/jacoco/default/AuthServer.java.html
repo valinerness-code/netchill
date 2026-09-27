@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>AuthServer.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">netchill-auth</a> &gt; <a href="index.source.html" class="el_package">default</a> &gt; <span class="el_source">AuthServer.java</span></div><h1>AuthServer.java</h1><pre class="source lang-java linenums">import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLConnection;
+import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.KeySpec;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+
+public final class AuthServer {
+<span class="fc" id="L31">    private static final SecureRandom RANDOM = new SecureRandom();</span>
+    private static final int ITERATIONS = 210_000;
+<span class="fc" id="L33">    private static final int KEY_LENGTH = 256;</span>
+
+    private AuthServer() {
+    }
+
+    public static void main(String[] args) throws IOException, SQLException {
+<span class="nc" id="L39">        int port = Integer.parseInt(System.getenv().getOrDefault(&quot;API_PORT&quot;,</span>
+<span class="nc" id="L40">            System.getenv().getOrDefault(&quot;PORT&quot;, &quot;8080&quot;)));</span>
+<span class="nc" id="L41">        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);</span>
+<span class="nc" id="L42">        server.createContext(&quot;/&quot;, AuthServer::staticFile);</span>
+<span class="nc" id="L43">        server.createContext(&quot;/api/register&quot;, AuthServer::register);</span>
+<span class="nc" id="L44">        server.createContext(&quot;/api/login&quot;, AuthServer::login);</span>
+<span class="nc" id="L45">        initializeDatabase();</span>
+<span class="nc" id="L46">        server.start();</span>
+<span class="nc" id="L47">        System.out.println(&quot;Auth API listening on port &quot; + port);</span>
+<span class="nc" id="L48">    }</span>
+
+    private static void staticFile(HttpExchange exchange) throws IOException {
+<span class="fc" id="L51">        String method = exchange.getRequestMethod();</span>
+<span class="fc" id="L52">        boolean isHead = &quot;HEAD&quot;.equalsIgnoreCase(method);</span>
+<span class="fc bfc" id="L53" title="All 4 branches covered.">        if (!&quot;GET&quot;.equalsIgnoreCase(method) &amp;&amp; !isHead) {</span>
+<span class="fc" id="L54">            exchange.getResponseHeaders().set(&quot;Allow&quot;, &quot;GET, HEAD&quot;);</span>
+<span class="fc" id="L55">            respond(exchange, 405, &quot;Method not allowed&quot;);</span>
+<span class="fc" id="L56">            return;</span>
+        }
+
+<span class="fc" id="L59">        String requestPath = exchange.getRequestURI().getPath();</span>
+<span class="fc bfc" id="L60" title="All 2 branches covered.">        String relativePath = &quot;/&quot;.equals(requestPath) ? &quot;index.html&quot; : requestPath.substring(1);</span>
+<span class="fc" id="L61">        File file = new File(relativePath).getCanonicalFile();</span>
+<span class="fc" id="L62">        File root = new File(&quot;.&quot;).getCanonicalFile();</span>
+
+<span class="fc bfc" id="L64" title="All 4 branches covered.">        if (!file.toPath().startsWith(root.toPath()) || !file.isFile()) {</span>
+            // No index.html on disk (this backend has no bundled frontend) -- still
+            // return 200 with no body for a HEAD health check on &quot;/&quot; specifically,
+            // so platform health checks see a healthy status rather than a 404.
+<span class="pc bpc" id="L68" title="1 of 4 branches missed.">            if (isHead &amp;&amp; &quot;/&quot;.equals(requestPath)) {</span>
+<span class="fc" id="L69">                exchange.getResponseHeaders().set(&quot;Content-Length&quot;, &quot;0&quot;);</span>
+<span class="fc" id="L70">                exchange.sendResponseHeaders(200, -1);</span>
+<span class="fc" id="L71">                exchange.close();</span>
+<span class="fc" id="L72">                return;</span>
+            }
+<span class="fc" id="L74">            respond(exchange, 404, &quot;Not found&quot;);</span>
+<span class="fc" id="L75">            return;</span>
+        }
+
+<span class="fc" id="L78">        String contentType = URLConnection.guessContentTypeFromName(file.getName());</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">        if (contentType != null) {</span>
+<span class="fc" id="L80">            exchange.getResponseHeaders().set(&quot;Content-Type&quot;, contentType);</span>
+        }
+<span class="fc" id="L82">        exchange.getResponseHeaders().set(&quot;X-Content-Type-Options&quot;, &quot;nosniff&quot;);</span>
+
+<span class="fc bfc" id="L84" title="All 2 branches covered.">        if (isHead) {</span>
+<span class="fc" id="L85">            exchange.getResponseHeaders().set(&quot;Content-Length&quot;, String.valueOf(file.length()));</span>
+<span class="fc" id="L86">            exchange.sendResponseHeaders(200, -1);</span>
+<span class="fc" id="L87">            exchange.close();</span>
+<span class="fc" id="L88">            return;</span>
+        }
+
+<span class="fc" id="L91">        exchange.sendResponseHeaders(200, file.length());</span>
+<span class="fc" id="L92">        try (InputStream input = new FileInputStream(file);</span>
+<span class="fc" id="L93">             OutputStream output = exchange.getResponseBody()) {</span>
+<span class="fc" id="L94">            input.transferTo(output);</span>
+        }
+<span class="fc" id="L96">    }</span>
+
+    private static void register(HttpExchange exchange) throws IOException {
+<span class="pc bpc" id="L99" title="1 of 2 branches missed.">        if (!isPost(exchange)) return;</span>
+<span class="fc" id="L100">        Map&lt;String, String&gt; data = parseForm(exchange);</span>
+<span class="fc" id="L101">        String email = data.getOrDefault(&quot;email&quot;, &quot;&quot;).trim().toLowerCase();</span>
+<span class="fc" id="L102">        String password = data.getOrDefault(&quot;password&quot;, &quot;&quot;);</span>
+<span class="fc" id="L103">        String firstName = data.getOrDefault(&quot;first_name&quot;, &quot;&quot;).trim();</span>
+<span class="fc" id="L104">        String lastName = data.getOrDefault(&quot;last_name&quot;, &quot;&quot;).trim();</span>
+<span class="fc" id="L105">        String dobRaw = data.getOrDefault(&quot;date_of_birth&quot;, &quot;&quot;).trim();</span>
+
+<span class="fc bfc" id="L107" title="All 6 branches covered.">        if (!email.matches(&quot;^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$&quot;) || password.length() &lt; 6 || password.length() &gt; 128) {</span>
+<span class="fc" id="L108">            respond(exchange, 400, &quot;Invalid email or password&quot;);</span>
+<span class="fc" id="L109">            return;</span>
+        }
+<span class="pc bpc" id="L111" title="1 of 4 branches missed.">        if (firstName.isEmpty() || lastName.isEmpty()) {</span>
+<span class="fc" id="L112">            respond(exchange, 400, &quot;First and last name are required&quot;);</span>
+<span class="fc" id="L113">            return;</span>
+        }
+
+        // Date of birth is treated as optional at the database level (nullable
+        // column) so a missing/malformed value never blocks account creation --
+        // only credentials are actually required to register.
+<span class="nc" id="L119">        java.sql.Date dob = null;</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">        if (!dobRaw.isEmpty()) {</span>
+            try {
+<span class="nc" id="L122">                dob = java.sql.Date.valueOf(dobRaw); // expects yyyy-MM-dd, matching Python's date.isoformat()</span>
+<span class="nc" id="L123">            } catch (IllegalArgumentException ignored) {</span>
+<span class="nc" id="L124">                dob = null;</span>
+            }
+        }
+
+<span class="nc" id="L128">        byte[] salt = new byte[16];</span>
+<span class="nc" id="L129">        RANDOM.nextBytes(salt);</span>
+<span class="nc" id="L130">        try (Connection connection = database();</span>
+<span class="nc" id="L131">             PreparedStatement statement = connection.prepareStatement(</span>
+<span class="nc" id="L132">                     &quot;INSERT INTO users (email, password_hash, password_salt, first_name, last_name, date_of_birth) &quot;</span>
+                             + &quot;VALUES (?, ?, ?, ?, ?, ?)&quot;)) {
+<span class="nc" id="L134">            statement.setString(1, email);</span>
+<span class="nc" id="L135">            statement.setString(2, hash(password, salt));</span>
+<span class="nc" id="L136">            statement.setBytes(3, salt);</span>
+<span class="nc" id="L137">            statement.setString(4, firstName);</span>
+<span class="nc" id="L138">            statement.setString(5, lastName);</span>
+<span class="nc bnc" id="L139" title="All 2 branches missed.">            if (dob != null) {</span>
+<span class="nc" id="L140">                statement.setDate(6, dob);</span>
+<span class="nc" id="L141">            } else {</span>
+<span class="nc" id="L142">                statement.setNull(6, java.sql.Types.DATE);</span>
+            }
+<span class="nc" id="L144">            statement.executeUpdate();</span>
+<span class="nc" id="L145">            respond(exchange, 201, &quot;Account created&quot;);</span>
+<span class="nc" id="L146">        } catch (SQLException error) {</span>
+<span class="nc bnc" id="L147" title="All 2 branches missed.">            if (&quot;23505&quot;.equals(error.getSQLState())) {</span>
+<span class="nc" id="L148">                respond(exchange, 409, &quot;An account with that email already exists&quot;);</span>
+<span class="nc" id="L149">            } else {</span>
+<span class="nc" id="L150">                error.printStackTrace();</span>
+<span class="nc" id="L151">                respond(exchange, 500, &quot;Database error&quot;);</span>
+            }
+        }
+<span class="nc" id="L154">    }</span>
+
+    private static void login(HttpExchange exchange) throws IOException {
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">        if (!isPost(exchange)) return;</span>
+<span class="nc" id="L158">        Map&lt;String, String&gt; data = parseForm(exchange);</span>
+<span class="nc" id="L159">        String email = data.getOrDefault(&quot;email&quot;, &quot;&quot;).trim().toLowerCase();</span>
+<span class="nc" id="L160">        String password = data.getOrDefault(&quot;password&quot;, &quot;&quot;);</span>
+
+<span class="nc" id="L162">        try (Connection connection = database();</span>
+<span class="nc" id="L163">             PreparedStatement statement = connection.prepareStatement(</span>
+<span class="nc" id="L164">                     &quot;SELECT password_hash, password_salt, first_name FROM users WHERE email = ?&quot;)) {</span>
+<span class="nc" id="L165">            statement.setString(1, email);</span>
+<span class="nc" id="L166">            try (ResultSet result = statement.executeQuery()) {</span>
+<span class="nc bnc" id="L167" title="All 4 branches missed.">                if (result.next() &amp;&amp; hash(password, result.getBytes(&quot;password_salt&quot;)).equals(result.getString(&quot;password_hash&quot;))) {</span>
+<span class="nc" id="L168">                    String firstName = result.getString(&quot;first_name&quot;);</span>
+<span class="nc bnc" id="L169" title="All 4 branches missed.">                    if (firstName == null || firstName.isBlank()) {</span>
+                        // Accounts created before the name fields existed (or with a blank
+                        // value) fall back to something readable instead of a blank name.
+<span class="nc bnc" id="L172" title="All 2 branches missed.">                        String localPart = email.contains(&quot;@&quot;) ? email.substring(0, email.indexOf('@')) : email;</span>
+<span class="nc bnc" id="L173" title="All 2 branches missed.">                        firstName = localPart.isEmpty() ? &quot;Member&quot; : Character.toUpperCase(localPart.charAt(0)) + localPart.substring(1);</span>
+                    }
+<span class="nc" id="L175">                    String json = &quot;{\&quot;message\&quot;:\&quot;Signed in\&quot;,\&quot;first_name\&quot;:\&quot;&quot; + jsonEscape(firstName) + &quot;\&quot;}&quot;;</span>
+<span class="nc" id="L176">                    respondJson(exchange, 200, json);</span>
+<span class="nc" id="L177">                } else {</span>
+<span class="nc" id="L178">                    respond(exchange, 401, &quot;Invalid email or password&quot;);</span>
+                }
+            }
+<span class="nc" id="L181">        } catch (SQLException error) {</span>
+<span class="nc" id="L182">            error.printStackTrace();</span>
+<span class="nc" id="L183">            respond(exchange, 500, &quot;Database error&quot;);</span>
+        }
+<span class="nc" id="L185">    }</span>
+
+    private static Connection database() throws SQLException {
+<span class="nc" id="L188">        String databaseUrl = System.getenv(&quot;DATABASE_URL&quot;);</span>
+<span class="nc bnc" id="L189" title="All 4 branches missed.">        if (databaseUrl != null &amp;&amp; !databaseUrl.isBlank()) {</span>
+<span class="nc" id="L190">            URI databaseUri = URI.create(databaseUrl.trim());</span>
+<span class="nc bnc" id="L191" title="All 2 branches missed.">            if (!&quot;postgres&quot;.equalsIgnoreCase(databaseUri.getScheme())</span>
+<span class="nc bnc" id="L192" title="All 2 branches missed.">                    &amp;&amp; !&quot;postgresql&quot;.equalsIgnoreCase(databaseUri.getScheme())) {</span>
+<span class="nc" id="L193">                throw new IllegalStateException(&quot;DATABASE_URL must be a PostgreSQL connection URL&quot;);</span>
+            }
+<span class="nc" id="L195">            String host = databaseUri.getHost();</span>
+<span class="nc" id="L196">            String path = databaseUri.getPath();</span>
+<span class="nc bnc" id="L197" title="All 6 branches missed.">            if (host == null || path == null || path.length() &lt; 2) {</span>
+<span class="nc" id="L198">                throw new IllegalStateException(&quot;DATABASE_URL must include a database host and name&quot;);</span>
+            }
+<span class="nc" id="L200">            Properties properties = new Properties();</span>
+<span class="nc bnc" id="L201" title="All 2 branches missed.">            String[] credentials = databaseUri.getUserInfo() == null</span>
+<span class="nc" id="L202">                    ? new String[0]</span>
+<span class="nc" id="L203">                    : databaseUri.getUserInfo().split(&quot;:&quot;, 2);</span>
+<span class="nc bnc" id="L204" title="All 2 branches missed.">            if (credentials.length == 2) {</span>
+<span class="nc" id="L205">                properties.setProperty(&quot;user&quot;, credentials[0]);</span>
+<span class="nc" id="L206">                properties.setProperty(&quot;password&quot;, credentials[1]);</span>
+            }
+<span class="nc" id="L208">            properties.setProperty(&quot;sslmode&quot;, &quot;require&quot;);</span>
+<span class="nc bnc" id="L209" title="All 2 branches missed.">            String port = databaseUri.getPort() &gt; 0 ? &quot;:&quot; + databaseUri.getPort() : &quot;&quot;;</span>
+<span class="nc" id="L210">            return DriverManager.getConnection(&quot;jdbc:postgresql://&quot; + host + port + path, properties);</span>
+        }
+
+<span class="nc" id="L213">        Properties properties = new Properties();</span>
+<span class="nc" id="L214">        properties.setProperty(&quot;user&quot;, required(&quot;PGUSER&quot;));</span>
+<span class="nc" id="L215">        properties.setProperty(&quot;password&quot;, required(&quot;PGPASSWORD&quot;));</span>
+<span class="nc" id="L216">        properties.setProperty(&quot;sslmode&quot;, &quot;require&quot;);</span>
+<span class="nc" id="L217">        String host = required(&quot;PGHOST&quot;);</span>
+<span class="nc" id="L218">        String port = System.getenv().getOrDefault(&quot;PGPORT&quot;, &quot;5432&quot;);</span>
+<span class="nc" id="L219">        String database = required(&quot;PGDATABASE&quot;);</span>
+<span class="nc" id="L220">        return DriverManager.getConnection(&quot;jdbc:postgresql://&quot; + host + &quot;:&quot; + port + &quot;/&quot; + database, properties);</span>
+    }
+
+    private static void initializeDatabase() throws SQLException {
+<span class="nc" id="L224">        try (Connection connection = database()) {</span>
+<span class="nc" id="L225">            try (PreparedStatement statement = connection.prepareStatement(</span>
+<span class="nc" id="L226">                    &quot;CREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash TEXT NOT NULL, password_salt BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())&quot;)) {</span>
+<span class="nc" id="L227">                statement.executeUpdate();</span>
+            }
+            // Added after the original table was already deployed, so these are applied
+            // as an idempotent migration (safe to run on every startup, including against
+            // a table that already has these columns or already has existing rows).
+<span class="nc" id="L232">            try (PreparedStatement statement = connection.prepareStatement(</span>
+<span class="nc" id="L233">                    &quot;ALTER TABLE users &quot;</span>
+                            + &quot;ADD COLUMN IF NOT EXISTS first_name VARCHAR(100), &quot;
+                            + &quot;ADD COLUMN IF NOT EXISTS last_name VARCHAR(100), &quot;
+                            + &quot;ADD COLUMN IF NOT EXISTS date_of_birth DATE&quot;)) {
+<span class="nc" id="L237">                statement.executeUpdate();</span>
+            }
+        }
+<span class="nc" id="L240">    }</span>
+
+    private static String required(String name) {
+<span class="nc" id="L243">        String value = System.getenv(name);</span>
+<span class="nc bnc" id="L244" title="All 4 branches missed.">        if (value == null || value.isBlank()) throw new IllegalStateException(name + &quot; is not configured&quot;);</span>
+<span class="nc" id="L245">        return value;</span>
+    }
+
+    private static String hash(String password, byte[] salt) {
+        try {
+<span class="fc" id="L250">            KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH);</span>
+<span class="fc" id="L251">            byte[] encoded = SecretKeyFactory.getInstance(&quot;PBKDF2WithHmacSHA256&quot;).generateSecret(spec).getEncoded();</span>
+<span class="fc" id="L252">            return Base64.getEncoder().encodeToString(encoded);</span>
+<span class="nc" id="L253">        } catch (NoSuchAlgorithmException | InvalidKeySpecException error) {</span>
+<span class="nc" id="L254">            throw new IllegalStateException(&quot;Password hashing is unavailable&quot;, error);</span>
+        }
+    }
+
+    private static Map&lt;String, String&gt; parseForm(HttpExchange exchange) throws IOException {
+<span class="fc" id="L259">        try (InputStream input = exchange.getRequestBody()) {</span>
+<span class="fc" id="L260">            String body = new String(input.readAllBytes(), StandardCharsets.UTF_8);</span>
+<span class="fc" id="L261">            Map&lt;String, String&gt; values = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L262" title="All 2 branches covered.">            for (String pair : body.split(&quot;&amp;&quot;)) {</span>
+<span class="fc" id="L263">                String[] parts = pair.split(&quot;=&quot;, 2);</span>
+<span class="fc bfc" id="L264" title="All 2 branches covered.">                if (parts.length == 2) values.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8), URLDecoder.decode(parts[1], StandardCharsets.UTF_8));</span>
+            }
+<span class="fc" id="L266">            return values;</span>
+        }
+    }
+
+    private static boolean isPost(HttpExchange exchange) throws IOException {
+<span class="fc bfc" id="L271" title="All 2 branches covered.">        if (&quot;POST&quot;.equalsIgnoreCase(exchange.getRequestMethod())) return true;</span>
+<span class="fc" id="L272">        exchange.getResponseHeaders().set(&quot;Allow&quot;, &quot;POST&quot;);</span>
+<span class="fc" id="L273">        respond(exchange, 405, &quot;Method not allowed&quot;);</span>
+<span class="fc" id="L274">        return false;</span>
+    }
+
+    private static void respond(HttpExchange exchange, int status, String message) throws IOException {
+<span class="fc" id="L278">        writeResponse(exchange, status, &quot;text/plain; charset=UTF-8&quot;, message.getBytes(StandardCharsets.UTF_8));</span>
+<span class="fc" id="L279">    }</span>
+
+    private static void respondJson(HttpExchange exchange, int status, String json) throws IOException {
+<span class="fc" id="L282">        writeResponse(exchange, status, &quot;application/json; charset=UTF-8&quot;, json.getBytes(StandardCharsets.UTF_8));</span>
+<span class="fc" id="L283">    }</span>
+
+    private static void writeResponse(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
+        // Inject Essential Global CORS Metadata Elements
+<span class="fc" id="L287">        exchange.getResponseHeaders().set(&quot;Access-Control-Allow-Origin&quot;, &quot;*&quot;);</span>
+<span class="fc" id="L288">        exchange.getResponseHeaders().set(&quot;Access-Control-Allow-Methods&quot;, &quot;POST, GET, OPTIONS&quot;);</span>
+<span class="fc" id="L289">        exchange.getResponseHeaders().set(&quot;Access-Control-Allow-Headers&quot;, &quot;Content-Type, Authorization&quot;);</span>
+
+<span class="fc" id="L291">        exchange.getResponseHeaders().set(&quot;Content-Type&quot;, contentType);</span>
+<span class="fc" id="L292">        exchange.getResponseHeaders().set(&quot;Cache-Control&quot;, &quot;no-store&quot;);</span>
+
+        // HEAD requests (e.g. Render's health check pinging &quot;/&quot;) must carry the
+        // same Content-Length a GET would return, but no body. Passing the real
+        // body length to sendResponseHeaders on a HEAD request triggers a JDK
+        // warning, so we set Content-Length manually and send -1 (no body) instead.
+<span class="fc bfc" id="L298" title="All 2 branches covered.">        if (&quot;HEAD&quot;.equalsIgnoreCase(exchange.getRequestMethod())) {</span>
+<span class="fc" id="L299">            exchange.getResponseHeaders().set(&quot;Content-Length&quot;, String.valueOf(body.length));</span>
+<span class="fc" id="L300">            exchange.sendResponseHeaders(status, -1);</span>
+<span class="fc" id="L301">            exchange.close();</span>
+<span class="fc" id="L302">            return;</span>
+        }
+
+<span class="fc" id="L305">        exchange.sendResponseHeaders(status, body.length);</span>
+<span class="fc" id="L306">        try (OutputStream output = exchange.getResponseBody()) {</span>
+<span class="fc" id="L307">            output.write(body);</span>
+        }
+<span class="fc" id="L309">    }</span>
+
+    /** Minimal JSON string escaping -- good enough for names/emails, not a general-purpose encoder. */
+    private static String jsonEscape(String value) {
+<span class="fc" id="L313">        return value.replace(&quot;\\&quot;, &quot;\\\\&quot;)</span>
+<span class="fc" id="L314">                .replace(&quot;\&quot;&quot;, &quot;\\\&quot;&quot;)</span>
+<span class="fc" id="L315">                .replace(&quot;\n&quot;, &quot;\\n&quot;)</span>
+<span class="fc" id="L316">                .replace(&quot;\r&quot;, &quot;\\r&quot;)</span>
+<span class="fc" id="L317">                .replace(&quot;\t&quot;, &quot;\\t&quot;);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.14.202510111229</span></div></body></html>
