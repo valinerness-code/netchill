@@ -1,5 +1,5 @@
-# Step 1: Build stage using Maven and Microsoft OpenJDK 17
-FROM mcr.microsoft.com/openjdk/jdk:17-ubuntu AS build
+# Step 1: Build stage using Maven and Microsoft OpenJDK 25
+FROM mcr.microsoft.com/openjdk/jdk:25-ubuntu AS build
 WORKDIR /app
 
 # Install Maven natively to handle dependencies
@@ -14,7 +14,7 @@ COPY src src
 RUN mvn clean package -DskipTests
 
 # Step 2: Production runtime stage
-FROM mcr.microsoft.com/openjdk/jdk:17-ubuntu
+FROM mcr.microsoft.com/openjdk/jdk:25-ubuntu
 WORKDIR /app
 
 # Pull the compiled app jar with dependencies from the build environment
