@@ -44,11 +44,12 @@ jobs:
           docker build -t ${{ secrets.DOCKER_USERNAME }}/netchill-backend:latest -t ${{ secrets.DOCKER_USERNAME }}/netchill-backend:${{ github.sha }} ./backend
           docker push ${{ secrets.DOCKER_USERNAME }}/netchill-backend --all-tags
 
-      # Tell Render to redeploy (diagnostic version: prints Render's response)
+      # Tell Render to redeploy with the new images
+      # --fail makes the run go red if Render rejects the request
       - name: Deploy Backend on Render
         run: |
-          curl -sS -w "\nHTTP status: %{http_code}\n" "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-backend%3A${{ github.sha }}"
+          curl --fail -sS "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-backend%3A${{ github.sha }}"
 
       - name: Deploy Frontend on Render
         run: |
-          curl -sS -w "\nHTTP status: %{http_code}\n" "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-frontend%3A${{ github.sha }}"
+          curl --fail -sS "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-frontend%3A${{ github.sha }}"
