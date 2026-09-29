@@ -1,4 +1,5 @@
 import os
+import html
 import random
 import hashlib
 import streamlit as st
@@ -6,14 +7,14 @@ import re
 import requests
 from datetime import date
 
-def _flatten_html(html: str) -> str:
+def _flatten_html(html_str: str) -> str:
     """Collapses all whitespace runs (including newlines/indentation) down to
     single spaces. HTML rendering here doesn't depend on whitespace, but
     Streamlit's markdown pre-processor can misread heavily-indented, multi-line
     content (e.g. a `style="..."` attribute split across lines) as an indented
     code block and render it as literal text instead of passing it through as
     HTML -- flattening avoids that entirely."""
-    return re.sub(r"\s+", " ", html).strip()
+    return re.sub(r"\s+", " ", html_str).strip()
 
 # =========================================================================
 # 1. SETUP & UTILITY HOOKS
@@ -23,20 +24,41 @@ st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", pag
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
 
-# 1. Netflix-style hero background: a wall of poster-look tiles (each with its
-#    own generated title, like real content thumbnails) behind a dark scrim,
-#    instead of a single random stock photo or plain color blocks. Rendered as
-#    real HTML fixed behind the page content -- CSS `background` alone can't
-#    draw text, which is why an earlier version looked like blank color swatches.
+# Unsplash API key: set it in Render's Environment tab, never in the code.
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
+
 if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
 
+# ---- Unsplash background images ----
+# The old source.unsplash.com/random URL is dead, so we use the official API.
+def _request_unsplash(count: int) -> list:
+    r = requests.get(
+        "https://api.unsplash.com/photos/random",
+        params={"count": count, "orientation": "portrait"},
+        headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return [p["urls"]["small"] for p in r.json()]
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_unsplash(seed: int, count: int) -> list:
+    # Cached for 1 hour so we don't call the API on every rerun.
+    # Errors aren't cached, so a failed call is retried next time.
+    return _request_unsplash(count)
+
+def fetch_unsplash_images(seed: int, count: int = 30) -> list:
+    """Returns image URLs, or [] on failure (tiles then use gradients)."""
+    if not UNSPLASH_ACCESS_KEY:
+        return []
+    try:
+        return _cached_unsplash(seed, count)
+    except Exception:
+        return []
+
 # ---- Poster-card generator ---------------------------------------------
-# There's no free API for real (licensed) movie-poster art, and pulling actual
-# studio poster images would raise copyright issues. Instead we generate
-# original "poster-look" cards in pure CSS: a deterministic gradient (so the
-# same title always gets the same look), bold poster-style type, a rating
-# badge, and a framed/shadowed card -- styled like a streaming-service tile.
+# Movie/TV cards: a gradient picked from the title, plus genre and rating.
 _PALETTES = [
     ("#1f1c2c", "#928dab"), ("#0f2027", "#2c5364"), ("#3a1c71", "#d76d77"),
     ("#0f0c29", "#302b63"), ("#833ab4", "#fd1d1d"), ("#134e5e", "#71b280"),
@@ -44,46 +66,24 @@ _PALETTES = [
     ("#141e30", "#243b55"), ("#5f2c82", "#49a09d"), ("#642b73", "#c6426e"),
 ]
 
-_TITLE_WORDS_A = [
-    "Midnight", "Crimson", "Neon", "Silent", "Glass", "Shadow", "Golden", "Iron",
-    "Velvet", "Echo", "Emerald", "Obsidian", "Scarlet", "Frozen", "Electric", "Hollow",
-]
-_TITLE_WORDS_B = [
-    "Run", "Tide", "Glow", "City", "Ridge", "Lane", "Static", "Horizon",
-    "Drift", "Reign", "Pulse", "Harbor", "Rebellion", "Protocol", "Ascension", "Nightfall",
-]
-
 def _poster_palette(title: str):
     idx = int(hashlib.md5(title.encode()).hexdigest(), 16) % len(_PALETTES)
     return _PALETTES[idx]
 
-def build_hero_poster_wall_html(cols: int = 7, rows: int = 5) -> str:
-    """Renders a fixed, full-viewport grid of poster-style tiles (gradient +
-    generated title) behind a dark scrim, sitting behind all page content via
-    z-index. A random seed picks a fresh set of titles/colors each session."""
+def build_hero_poster_wall_html(cols: int = 5, rows: int = 3) -> str:
+    """Full-screen tile grid behind a dark overlay.
+    5x3 = 15 Unsplash photos (gradients if the API fails)."""
+    images = fetch_unsplash_images(st.session_state.bg_seed, cols * rows)
     rng = random.Random(st.session_state.bg_seed)
     tiles = []
-    for _ in range(cols * rows):
-        title = f"{rng.choice(_TITLE_WORDS_A)} {rng.choice(_TITLE_WORDS_B)}"
-        c1, c2 = rng.choice(_PALETTES)
-        tiles.append(f"""
-            <div style="
-                background: linear-gradient(155deg, {c1} 0%, {c2} 100%);
-                position: relative; overflow: hidden;
-                display:flex; align-items:flex-end; padding:10px; box-sizing:border-box;
-            ">
-                <div style="
-                    position:absolute; inset:0;
-                    background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0) 55%);
-                "></div>
-                <span style="
-                    position:relative; font-family: Georgia, 'Times New Roman', serif;
-                    font-weight:800; color:#fff; font-size:0.85rem; line-height:1.15;
-                    text-transform:uppercase; letter-spacing:0.5px;
-                    text-shadow:0 2px 6px rgba(0,0,0,0.75);
-                ">{title}</span>
-            </div>
-        """)
+    for i in range(cols * rows):
+        if images:
+            url = html.escape(images[i % len(images)], quote=True)
+            bg = f"#111 url('{url}') center/cover no-repeat"
+        else:
+            c1, c2 = rng.choice(_PALETTES)
+            bg = f"linear-gradient(155deg, {c1} 0%, {c2} 100%)"
+        tiles.append(f'<div style="background: {bg}; position: relative; overflow: hidden;"></div>')
     result = f"""
     <div style="
         position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-2;
@@ -92,7 +92,7 @@ def build_hero_poster_wall_html(cols: int = 7, rows: int = 5) -> str:
     ">{''.join(tiles)}</div>
     <div style="
         position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-1;
-        background: rgba(0,0,0,0.55);
+        background: rgba(0,0,0,0.65);
     "></div>
     """
     return _flatten_html(result)
@@ -143,17 +143,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     """
     return _flatten_html(result)
 
-# 2. Base theme. The actual hero background (a wall of poster tiles) is real
-#    HTML rendered separately in landing_page(), fixed behind the content via
-#    z-index -- CSS alone can't draw the title text on each tile. .stApp stays
-#    transparent so that shows through; html/body keep a dark fallback color.
-#
-#    Getting the poster wall to sit BEHIND Streamlit's own content (rather than
-#    tangled up with it) needs more than a negative z-index on our own div --
-#    Streamlit wraps everything it renders in a container with the stable
-#    internal id `stAppViewContainer`. Explicitly giving THAT container a
-#    higher z-index establishes a clear, reliable stacking order regardless of
-#    where our injected markdown div ends up in the DOM.
+# 2. Base theme: .stApp is transparent so the background wall shows through.
 st.markdown(f"""
     <style>
     html, body {{ background: #0b0b0f; }}
@@ -174,7 +164,7 @@ st.markdown(f"""
     .brand-title {{ color: #E50914 !important; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; }}
     .hero-title {{ font-size: 3.5rem; font-weight: 800; line-height: 1.1; margin-bottom: 10px; color: #FFF; }}
 
-    /* Netflix-style row headers: tight, bold, no big margin -- the row IS the focus, not the label */
+    /* Netflix-style row headers */
     .section-title {{
         font-size: 1.4rem; font-weight: 700; margin-top: 28px; margin-bottom: 10px;
         color: #FFF; letter-spacing: 0.2px;
@@ -193,11 +183,11 @@ st.markdown(f"""
         box-shadow: 0 16px 34px rgba(0,0,0,0.75) !important;
         z-index: 5;
     }}
-    /* Let the hover scale actually show instead of being clipped by Streamlit's column padding */
-    div[data-testid="column"] {{ overflow: visible !important; }}
+    /* Let the hover scale show instead of being clipped (older + newer Streamlit test ids) */
+    div[data-testid="column"], div[data-testid="stColumn"] {{ overflow: visible !important; }}
     div[data-testid="stVerticalBlock"] {{ overflow: visible !important; }}
 
-    /* Primary CTAs (Sign In / Get Started / Register) -- bold red, Netflix's signature button */
+    /* Primary CTAs -- bold red */
     button[kind="primary"] {{
         background-color: #E50914 !important; color: white !important;
         border: none !important; padding: 0.5rem 1.5rem !important;
@@ -210,7 +200,7 @@ st.markdown(f"""
         box-shadow: 0 6px 16px rgba(229,9,20,0.45);
     }}
 
-    /* Row-action chips (Play / Watch Episode / Activate / Sign Out) -- slim ghost pills */
+    /* Row-action chips -- slim ghost pills */
     button[kind="secondary"] {{
         background-color: rgba(255,255,255,0.10) !important;
         color: #FFF !important;
