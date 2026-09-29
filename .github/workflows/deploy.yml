@@ -45,10 +45,10 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/netchill-backend --all-tags
 
       # Tell Render to redeploy with the new images
-      - name: Deploy Backend on Render
+           - name: Deploy Backend on Render
         run: |
-          curl --fail -s "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-backend%3A${{ github.sha }}"
+          curl -sS -w "\nHTTP status: %{http_code}\n" "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-backend%3A${{ github.sha }}"
 
       - name: Deploy Frontend on Render
         run: |
-          curl --fail -s "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-frontend%3A${{ github.sha }}"
+          curl -sS -w "\nHTTP status: %{http_code}\n" "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}&imgURL=docker.io%2F${{ secrets.DOCKER_USERNAME }}%2Fnetchill-frontend%3A${{ github.sha }}"
