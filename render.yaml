@@ -1,3 +1,12 @@
+# Shared by both services so the frontend can prove its identity to the backend
+# (lets the backend trust the end-user IP the frontend forwards for rate limiting).
+# Render generates a random value once and gives the same value to both services.
+envVarGroups:
+  - name: netchill-shared
+    envVars:
+      - key: API_SHARED_SECRET
+        generateValue: true
+
 services:
   # 1. Frontend Streamlit Web Service
   - type: web
@@ -8,6 +17,7 @@ services:
       # Render automatically links to your public Docker Hub repositories without any credentials!
       url: docker.io/valinerness/netchill-frontend:latest
     envVars:
+      - fromGroup: netchill-shared
       - key: PORT
         value: "8501"
       - key: BACKEND_API_URL
@@ -21,6 +31,7 @@ services:
     image:
       url: docker.io/valinerness/netchill-backend:latest
     envVars:
+      - fromGroup: netchill-shared
       - key: PORT
         value: "8080"
       - key: DATABASE_URL

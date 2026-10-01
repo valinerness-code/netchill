@@ -22,10 +22,55 @@ def _flatten_html(html_str: str) -> str:
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
+# In production this should be an https:// URL, since passwords travel over it.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
+# Render's free tier spins services down when idle and a cold start can take ~50s,
+# so the default is generous. Override with the REQUEST_TIMEOUT env var if you like.
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
+
+# Must equal API_SHARED_SECRET on the Java service. Lets the backend trust the end-user
+# IP we forward, so rate limits apply per user instead of to this server as a whole.
+API_SHARED_SECRET = os.getenv("API_SHARED_SECRET", "")
+
+def _backend_headers() -> dict:
+    headers = {}
+    if API_SHARED_SECRET:
+        headers["X-Api-Key"] = API_SHARED_SECRET
+        try:
+            forwarded = st.context.headers.get("X-Forwarded-For", "")
+            client_ip = forwarded.split(",")[0].strip()
+            if client_ip:
+                headers["X-Client-IP"] = client_ip
+        except Exception:
+            pass  # older Streamlit without st.context: backend falls back to its own detection
+    return headers
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
+
+# ---- Input validation (strict allowlists) ----
+EMAIL_REGEX = r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$"
+NAME_REGEX = r"^[^\W\d_]+(?:[ '\-][^\W\d_]+)*$"  # letters, spaces, ' and -
+
+def valid_email(s: str) -> bool:
+    # fullmatch (like Java's matches()): plain `$` would also accept a trailing newline
+    return len(s) <= 254 and re.fullmatch(EMAIL_REGEX, s) is not None
+
+def valid_name(s: str) -> bool:
+    # \w also admits some non-letters (e.g. superscript digits) that Java's \p{L} rejects,
+    # so additionally require every character to be a real letter, space, ' or -.
+    return (
+        0 < len(s) <= 50
+        and re.fullmatch(NAME_REGEX, s) is not None
+        and all(ch.isalpha() or ch in " '-" for ch in s)
+    )
+
+# Only allow Unsplash image URLs made of URL-safe characters (no quotes/parens),
+# so a URL can never break out of the CSS url('...') it is placed in.
+_UNSPLASH_URL_RE = re.compile(r"https://images\.unsplash\.com/[A-Za-z0-9._~:/?#\[\]@!$&*+,;=%-]+")
+
+def _safe_image_url(url) -> bool:
+    return isinstance(url, str) and len(url) < 2000 and _UNSPLASH_URL_RE.fullmatch(url) is not None
 
 if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
@@ -53,7 +98,7 @@ def fetch_unsplash_images(seed: int, count: int = 30) -> list:
     if not UNSPLASH_ACCESS_KEY:
         return []
     try:
-        return _cached_unsplash(seed, count)
+        return [u for u in _cached_unsplash(seed, count) if _safe_image_url(u)]
     except Exception:
         return []
 
@@ -70,20 +115,37 @@ def _poster_palette(title: str):
     idx = int(hashlib.md5(title.encode()).hexdigest(), 16) % len(_PALETTES)
     return _PALETTES[idx]
 
+_WALL_TITLES = [
+    "Midnight Run", "Skyline", "Crimson Tide", "Neon Glow", "Nightfall",
+    "Signal Ridge", "Glass City", "Thorn Lane", "Last Harbor", "Iron Orchard",
+    "Silent Echo", "Paper Moon", "Wild Static", "Ember Road", "Northern Lights",
+    "Velvet Hour", "Dark Meridian", "Golden Hollow", "Lost Frequency", "Broken Compass",
+]
+
 def build_hero_poster_wall_html(cols: int = 5, rows: int = 3) -> str:
-    """Full-screen tile grid behind a dark overlay.
-    5x3 = 15 Unsplash photos (gradients if the API fails)."""
-    images = fetch_unsplash_images(st.session_state.bg_seed, cols * rows)
+    """Full-screen tile grid behind a dark overlay, each tile with a fake title."""
+    total = cols * rows
+    images = fetch_unsplash_images(st.session_state.bg_seed, total)
     rng = random.Random(st.session_state.bg_seed)
+    titles = rng.sample(_WALL_TITLES, total)
     tiles = []
-    for i in range(cols * rows):
+    for i in range(total):
         if images:
             url = html.escape(images[i % len(images)], quote=True)
             bg = f"#111 url('{url}') center/cover no-repeat"
         else:
             c1, c2 = rng.choice(_PALETTES)
             bg = f"linear-gradient(155deg, {c1} 0%, {c2} 100%)"
-        tiles.append(f'<div style="background: {bg}; position: relative; overflow: hidden;"></div>')
+        title = html.escape(titles[i])
+        tiles.append(
+            f'<div style="background: {bg}; position: relative; overflow: hidden;">'
+            f'<div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 55%);"></div>'
+            f'<div style="position:absolute; left:10px; right:10px; bottom:14px; text-align:center; '
+            f"font-family:Georgia,'Times New Roman',serif; font-weight:900; text-transform:uppercase; "
+            f'font-size:clamp(0.9rem,1.8vw,1.6rem); line-height:1.1; color:#fff; '
+            f'text-shadow:0 3px 10px rgba(0,0,0,0.8); overflow-wrap:break-word;">{title}</div>'
+            f'</div>'
+        )
     result = f"""
     <div style="
         position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-2;
@@ -92,7 +154,7 @@ def build_hero_poster_wall_html(cols: int = 5, rows: int = 3) -> str:
     ">{''.join(tiles)}</div>
     <div style="
         position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-1;
-        background: rgba(0,0,0,0.65);
+        background: rgba(0,0,0,0.55);
     "></div>
     """
     return _flatten_html(result)
@@ -104,12 +166,14 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     c1, c2 = _poster_palette(title)
     if rating is None:
         rating = f"{(int(hashlib.md5((title+'r').encode()).hexdigest(), 16) % 25 + 70) / 10:.1f}"
-    words = title.split()
-    big = words[0]
-    rest = " ".join(words[1:])
+    n = len(title)
+    font_size = 1.6 if n <= 12 else 1.3 if n <= 20 else 1.05
+    safe_title = html.escape(title)
+    safe_genre = html.escape(genre)
+    safe_rating = html.escape(str(rating))
     result = f"""
     <div class="poster-tile" style="
-        position:relative; height:{height}px; border-radius:10px; overflow:hidden;
+        position:relative; height:{int(height)}px; border-radius:10px; overflow:hidden;
         background: linear-gradient(155deg, {c1} 0%, {c2} 100%);
         box-shadow: 0 8px 20px rgba(0,0,0,0.55);
         border: 1px solid rgba(255,255,255,0.08);
@@ -121,20 +185,19 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
             <span style="
                 background:rgba(0,0,0,0.45); color:#FFD166; font-size:0.7rem;
                 font-weight:700; padding:2px 8px; border-radius:4px; letter-spacing:1px;
-                text-transform:uppercase;">{genre}</span>
+                text-transform:uppercase;">{safe_genre}</span>
             <span style="
                 background:rgba(0,0,0,0.45); color:#fff; font-size:0.75rem;
-                font-weight:700; padding:2px 8px; border-radius:4px;">★ {rating}</span>
+                font-weight:700; padding:2px 8px; border-radius:4px;">★ {safe_rating}</span>
         </div>
-        <div style="text-align:center;">
+        <div style="text-align:center; min-width:0;">
             <div style="
                 font-family: Georgia, 'Times New Roman', serif; font-weight:900;
-                font-size:1.6rem; line-height:1.05; color:#fff; text-transform:uppercase;
-                text-shadow: 0 3px 10px rgba(0,0,0,0.6);">{big}</div>
-            <div style="
-                font-family: Georgia, 'Times New Roman', serif; font-weight:700;
-                font-size:1.05rem; color:rgba(255,255,255,0.9); text-transform:uppercase;
-                letter-spacing:2px;">{rest}</div>
+                font-size:{font_size}rem; line-height:1.1; color:#fff; text-transform:uppercase;
+                text-shadow: 0 3px 10px rgba(0,0,0,0.6);
+                overflow-wrap:break-word; word-break:normal; hyphens:auto;
+                display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+            ">{safe_title}</div>
         </div>
         <div style="
             height:3px; width:40%; margin:0 auto; background:rgba(255,255,255,0.35);
@@ -245,16 +308,17 @@ if "signup_last_name" not in st.session_state:
 if "signup_dob" not in st.session_state:
     st.session_state.signup_dob = None
 if "current_profile" not in st.session_state:
-    st.session_state.current_profile = "Alex"
+    st.session_state.current_profile = ""
+if "user_name" not in st.session_state:
+    st.session_state.user_name = ""
 if "profile_color" not in st.session_state:
     st.session_state.profile_color = "amber"
-
-EMAIL_REGEX = r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
 
 def sign_out_action():
     st.session_state.logged_in = False
     st.session_state.user_email = ""
-    st.session_state.current_profile = "Alex"
+    st.session_state.current_profile = ""
+    st.session_state.user_name = ""
     st.session_state.profile_color = "amber"
     st.session_state.signup_step = None
     st.session_state.signup_first_name = ""
@@ -274,36 +338,49 @@ def show_login_dialog():
     password = st.text_input("Password", type="password", placeholder="Enter your password")
 
     if st.button("Sign In", use_container_width=True, type="primary"):
-        if not re.match(EMAIL_REGEX, email):
+        if not valid_email(email):
             st.error("Enter a valid email address.")
-        elif len(password) < 6:
-            st.error("Password must be 6+ characters.")
+        elif not (6 <= len(password) <= 128):
+            st.error("Password must be 6-128 characters.")
         else:
             try:
                 # Java accepts form URL encoding (x-www-form-urlencoded) parameters natively
-                payload = {"email": email, "password": password}
-                response = requests.post(f"{BACKEND_API_URL}/api/login", data=payload)
+                response = requests.post(
+                    f"{BACKEND_API_URL}/api/login",
+                    data={"email": email, "password": password},
+                    headers=_backend_headers(),
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except requests.RequestException:
+                st.error("Can't reach the server. Please try again later.")
+                return
 
-                if response.status_code == 200:
-                    st.session_state.user_email = email
-                    st.session_state.logged_in = True
-                    try:
-                        st.session_state.current_profile = response.json().get("first_name", "Member")
-                    except ValueError:
-                        st.session_state.current_profile = "Member"
-                    st.success("Signed in successfully!")
-                    st.rerun()
-                else:
-                    st.error(f"Authentication Failed: {response.text}")
-            except Exception as e:
-                st.error(f"Cannot link to target API service container at {BACKEND_API_URL}. Details: {e}")
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except ValueError:
+                    data = {}
+                name = str(data.get("first_name") or data.get("firstName") or "")[:50]
+                if not valid_name(name):
+                    name = email.split("@")[0]
+                st.session_state.user_email = email
+                st.session_state.logged_in = True
+                st.session_state.user_name = name
+                st.session_state.current_profile = name
+                st.rerun()
+            elif response.status_code == 429:
+                st.error("Too many attempts. Please wait a few minutes and try again.")
+            elif response.status_code == 401:
+                st.error("Incorrect email or password.")
+            else:
+                st.error("Something went wrong. Please try again.")
 
 @st.dialog("Tell Us About You")
 def show_personal_info_dialog():
     """Step 1 of signup: collect profile basics, Netflix-style. No payment info here or ever."""
-    st.write(f"Almost there, **{st.session_state.signup_email}**. Just a little more about you.")
-    first_name = st.text_input("First name", value=st.session_state.signup_first_name)
-    last_name = st.text_input("Last name", value=st.session_state.signup_last_name)
+    st.text(f"Almost there, {st.session_state.signup_email}. Just a little more about you.")
+    first_name = st.text_input("First name", value=st.session_state.signup_first_name, max_chars=50)
+    last_name = st.text_input("Last name", value=st.session_state.signup_last_name, max_chars=50)
     dob = st.date_input(
         "Date of birth",
         value=st.session_state.signup_dob or date(2000, 1, 1),
@@ -312,8 +389,8 @@ def show_personal_info_dialog():
     )
 
     if st.button("Continue", use_container_width=True, type="primary"):
-        if not first_name.strip() or not last_name.strip():
-            st.error("Please enter your first and last name.")
+        if not (valid_name(first_name.strip()) and valid_name(last_name.strip())):
+            st.error("Names may only contain letters, spaces, apostrophes and hyphens (max 50).")
         else:
             st.session_state.signup_first_name = first_name.strip()
             st.session_state.signup_last_name = last_name.strip()
@@ -326,39 +403,48 @@ def show_registration_dialog():
     """Step 2 of signup: plan + password. Form-encodes everything, including the
     name/DOB collected in step 1, to the Java api/register endpoint. Deliberately
     no credit card / payment fields -- membership stays fake past this point."""
-    st.write(f"Hi **{st.session_state.signup_first_name}** — choose your plan and set a password.")
+    st.text(f"Hi {st.session_state.signup_first_name} — choose your plan and set a password.")
     plan = st.radio("Choose your plan", ["Basic - $8.99/mo", "Standard - $15.49/mo", "Premium - $22.99/mo"], index=2)
     email = st.text_input("Email address", value=st.session_state.signup_email).strip().lower()
     password = st.text_input("Create Password", type="password")
 
     if st.button("Register & Start Membership", use_container_width=True, type="primary"):
-        if not re.match(EMAIL_REGEX, email):
+        if not valid_email(email):
             st.error("Please enter a valid email address.")
         elif len(password) < 6 or len(password) > 128:
             st.error("Password must be between 6 and 128 characters.")
+        elif not (valid_name(st.session_state.signup_first_name) and valid_name(st.session_state.signup_last_name)):
+            st.error("Please go back and re-enter your name.")
         else:
+            payload = {
+                "email": email,
+                "password": password,
+                "first_name": st.session_state.signup_first_name,
+                "last_name": st.session_state.signup_last_name,
+                "date_of_birth": st.session_state.signup_dob.isoformat() if st.session_state.signup_dob else "",
+            }
             try:
-                payload = {
-                    "email": email,
-                    "password": password,
-                    "first_name": st.session_state.signup_first_name,
-                    "last_name": st.session_state.signup_last_name,
-                    "date_of_birth": st.session_state.signup_dob.isoformat() if st.session_state.signup_dob else "",
-                }
-                response = requests.post(f"{BACKEND_API_URL}/api/register", data=payload)
+                response = requests.post(f"{BACKEND_API_URL}/api/register", data=payload, headers=_backend_headers(), timeout=REQUEST_TIMEOUT)
+            except requests.RequestException:
+                st.error("Can't reach the server. Please try again later.")
+                return
 
-                if response.status_code == 201:
-                    st.session_state.user_email = email
-                    st.session_state.logged_in = True
-                    st.session_state.current_profile = st.session_state.signup_first_name
-                    st.session_state.signup_email = ""
-                    st.session_state.signup_step = None
-                    st.success("Account created successfully!")
-                    st.rerun()
-                else:
-                    st.error(f"Registration Error: {response.text}")
-            except Exception as e:
-                st.error(f"Cannot link to target API service container. Details: {e}")
+            if response.status_code == 201:
+                st.session_state.user_email = email
+                st.session_state.logged_in = True
+                st.session_state.current_profile = st.session_state.signup_first_name
+                st.session_state.user_name = st.session_state.signup_first_name
+                st.session_state.signup_email = ""
+                st.session_state.signup_step = None
+                st.rerun()
+            elif response.status_code == 409:
+                st.error("An account with that email already exists. Try signing in instead.")
+            elif response.status_code == 429:
+                st.error("Too many attempts. Please try again later.")
+            elif response.status_code == 400:
+                st.error("Please check your details and try again.")
+            else:
+                st.error("Something went wrong. Please try again.")
 
 # =========================================================================
 # 3. INTERACTION FEEDS & PLATFORM WORKSPACES
@@ -367,34 +453,40 @@ def show_registration_dialog():
 def landing_page():
     st.markdown(build_hero_poster_wall_html(), unsafe_allow_html=True)
 
-    # Re-open whichever signup step is in progress. This runs on every rerun
-    # while a step is active, so clicking "Continue" inside step 1 (which sets
-    # signup_step = "plan" and reruns) automatically opens step 2 next.
     if st.session_state.signup_step == "info":
         show_personal_info_dialog()
     elif st.session_state.signup_step == "plan":
         show_registration_dialog()
 
-    nav_col1, nav_col2 = st.columns(2)
-    with nav_col1:
-        st.markdown('<div class="brand-title">NETCHILL</div>', unsafe_allow_html=True)
-    with nav_col2:
-        if st.button("Sign In", use_container_width=True, type="primary"):
-            show_login_dialog()
+    # Top bar: empty left | NETCHILL centered | Sign In on the right
+    nav_left, nav_center, nav_right = st.columns([3, 4, 3])
+    with nav_center:
+        st.markdown(
+            '<div class="brand-title" style="text-align:center; font-size:4rem;">NETCHILL</div>',
+            unsafe_allow_html=True,
+        )
+    with nav_right:
+        _spacer, signin_col = st.columns([1, 1])   # button takes half of this column
+        with signin_col:
+            if st.button("Sign In", use_container_width=True, type="primary"):
+                show_login_dialog()
 
     st.write("")
     st.markdown('<p style="color: #E50914; font-weight: 700; text-transform: uppercase;">New & trending</p>', unsafe_allow_html=True)
     st.markdown('<h1 class="hero-title">Unlimited movies, TV shows, and more.</h1>', unsafe_allow_html=True)
     st.markdown('<h5>Watch anywhere. Cancel anytime.</h5>', unsafe_allow_html=True)
 
-    st.write("")
-    col_em, col_btn = st.columns(2)
+    # Push the email box and button further down the page
+    st.markdown('<div style="height:160px;"></div>', unsafe_allow_html=True)
+
+    # Email box and button are each half their old width (25% of the page each)
+    col_em, col_btn, _rest = st.columns([1, 1, 2])
     with col_em:
-        hero_email = st.text_input("Email address", placeholder="Email address", label_visibility="collapsed", key="hero_email_input")
+        hero_email = st.text_input("Email address", placeholder="Email address", label_visibility="collapsed", key="hero_email_input", max_chars=254)
     with col_btn:
         if st.button("Get Started", use_container_width=True, type="primary"):
-            clean_email = hero_email.strip()
-            if not re.match(EMAIL_REGEX, clean_email):
+            clean_email = hero_email.strip().lower()
+            if not valid_email(clean_email):
                 st.error("Please enter a valid email address.")
             else:
                 st.session_state.signup_email = clean_email
@@ -404,7 +496,11 @@ def landing_page():
 def dashboard_page():
     view_selection = st.radio("Filter Content Matrix", ["Home", "Series", "Movies"], horizontal=True, label_visibility="collapsed")
     color_emoji = "🟡" if st.session_state.profile_color == "amber" else "🔴" if st.session_state.profile_color == "pink" else "🔵"
-    st.markdown(f"### {color_emoji} Active Session: **{st.session_state.current_profile}**")
+    safe_profile = html.escape(st.session_state.current_profile)
+    st.markdown(
+        f"<h3>{color_emoji} Active Session: <b>{safe_profile}</b></h3>",
+        unsafe_allow_html=True,
+    )
 
     if view_selection in ["Home", "Movies"]:
         st.markdown('<div class="section-title">Movies</div>', unsafe_allow_html=True)
@@ -434,7 +530,7 @@ def manage_profiles_page():
     st.markdown('<div class="section-title" style="text-align:center;">Manage Profiles</div>', unsafe_allow_html=True)
     p_cols = st.columns(3)
     profiles_data = [
-        {"name": "Alex", "color": "amber", "avatar": "🟡"},
+        {"name": st.session_state.user_name or "Me", "color": "amber", "avatar": "🟡"},
         {"name": "Mia", "color": "pink", "avatar": "🔴"},
         {"name": "Kids", "color": "blue", "avatar": "🔵"}
     ]
@@ -443,10 +539,11 @@ def manage_profiles_page():
             st.markdown(f"""
             <div class="profile-card">
                 <h1 style='font-size:4rem; margin:0;'>{p['avatar']}</h1>
-                <h3>{p['name']}</h3>
+                <h3>{html.escape(p['name'])}</h3>
             </div>
             """, unsafe_allow_html=True)
-            if st.button(f"Activate {p['name']}", key=f"set_prof_{p['name']}", use_container_width=True):
+            # Key by index (not name) so a user named "Mia" or "Kids" can't cause a duplicate-key error.
+            if st.button(f"Activate {p['name']}", key=f"set_prof_{idx}", use_container_width=True):
                 st.session_state.current_profile = p['name']
                 st.session_state.profile_color = p['color']
                 st.toast(f"Switched profile context directly to {p['name']}!")
@@ -455,11 +552,16 @@ def manage_profiles_page():
 def account_page():
     st.markdown('<div class="section-title">Account Details</div>', unsafe_allow_html=True)
     st.write("---")
-    col_lbl, col_val = st.columns(2)
-    with col_lbl:
-        st.markdown("**Membership Tier**\n\n**Registered User Email**\n\n**Video Resolution Profile**\n\n**Billing Account Record**")
-    with col_val:
-        st.markdown(f"Premium Framework\n\n{st.session_state.user_email}\n\n4K Ultra-HD Streaming Active\n\nVisa •••• 2431")
+    rows = [
+        ("Membership Tier", "Premium Framework"),
+        ("Registered User Email", st.session_state.user_email),
+        ("Video Resolution Profile", "4K Ultra-HD Streaming Active"),
+        ("Billing Account Record", "Visa •••• 2431"),
+    ]
+    for label, value in rows:
+        col_lbl, col_val = st.columns(2)
+        col_lbl.markdown(f"**{label}**")
+        col_val.text(value)  # plain text: never interpreted as markdown/HTML
 
 def help_page():
     st.markdown('<div class="section-title">Help Center Assistance Dashboard</div>', unsafe_allow_html=True)
@@ -473,7 +575,7 @@ def run_app():
     with st.sidebar:
         st.markdown('<div class="brand-title">NETCHILL</div>', unsafe_allow_html=True)
         page = st.radio("Navigation", ["Browse", "Profiles", "Account", "Help"])
-        st.caption(st.session_state.user_email)
+        st.text(st.session_state.user_email)
         if st.button("Sign Out", use_container_width=True):
             sign_out_action()
 

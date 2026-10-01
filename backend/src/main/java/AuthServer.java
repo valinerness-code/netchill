@@ -1,16 +1,15 @@
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
-import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
@@ -20,107 +19,184 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
+import java.util.ArrayDeque;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
 public final class AuthServer {
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int ITERATIONS = 210_000;
+
+    // New accounts use the current OWASP-recommended count. Existing accounts keep the
+    // count they were created with (stored per-user) and are upgraded on next login.
+    private static final int ITERATIONS = 600_000;
+    private static final int LEGACY_ITERATIONS = 210_000;
     private static final int KEY_LENGTH = 256;
 
+    private static final int MAX_BODY = 8 * 1024;
+    private static final byte[] DUMMY_SALT = new byte[16];
+
+    private static final Pattern EMAIL =
+            Pattern.compile("^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\\.[A-Za-z]{2,}$");
+    private static final Pattern NAME =
+            Pattern.compile("^\\p{L}+(?:[ '\\-]\\p{L}+)*$");
+
+    // Rate limits
+    private static final long LOGIN_WINDOW_MS = 15 * 60_000L;
+    private static final int LOGIN_MAX_FAILS_PER_EMAIL = 5;
+    private static final int LOGIN_MAX_FAILS_PER_IP = 20;
+    private static final long REGISTER_WINDOW_MS = 60 * 60_000L;
+    private static final int REGISTER_MAX_PER_IP = 10;
+    private static final Limiter LIMITER = new Limiter();
+
+    // Optional: lets the Streamlit server forward the real end-user IP (see clientIp).
+    private static final String API_SECRET = System.getenv("API_SHARED_SECRET");
+    private static final Pattern IP_LIKE = Pattern.compile("^[0-9A-Fa-f:.]{3,45}$");
+
     private AuthServer() {
+    }
+
+    /** Thrown for client mistakes; turned into a 400 response by safe(). */
+    private static final class BadRequest extends RuntimeException {
+        BadRequest(String message) {
+            super(message);
+        }
+    }
+
+    /** Small in-memory sliding-window limiter. */
+    private static final class Limiter {
+        private final Map<String, Deque<Long>> hits = new ConcurrentHashMap<>();
+
+        boolean isLimited(String key, int max, long windowMs) {
+            Deque<Long> queue = hits.get(key);
+            if (queue == null) return false;
+            long now = System.currentTimeMillis();
+            synchronized (queue) {
+                while (!queue.isEmpty() && now - queue.peekFirst() > windowMs) queue.pollFirst();
+                return queue.size() >= max;
+            }
+        }
+
+        void record(String key) {
+            Deque<Long> queue = hits.computeIfAbsent(key, k -> new ArrayDeque<>());
+            synchronized (queue) {
+                queue.addLast(System.currentTimeMillis());
+            }
+        }
+
+        void clear(String key) {
+            hits.remove(key);
+        }
+
+        void cleanup(long maxAgeMs) {
+            long now = System.currentTimeMillis();
+            hits.entrySet().removeIf(entry -> {
+                synchronized (entry.getValue()) {
+                    Long last = entry.getValue().peekLast();
+                    return last == null || now - last > maxAgeMs;
+                }
+            });
+        }
     }
 
     public static void main(String[] args) throws IOException, SQLException {
         int port = Integer.parseInt(System.getenv().getOrDefault("API_PORT",
             System.getenv().getOrDefault("PORT", "8080")));
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/", AuthServer::staticFile);
-        server.createContext("/api/register", AuthServer::register);
-        server.createContext("/api/login", AuthServer::login);
+
+        // PBKDF2 is CPU-heavy; a pool keeps one slow login from freezing the whole API.
+        server.setExecutor(Executors.newFixedThreadPool(8));
+
+        // No static files are served. "/" only answers health checks (GET and HEAD).
+        server.createContext("/", safe(exchange -> {
+            if ("/".equals(exchange.getRequestURI().getPath())) {
+                respond(exchange, 200, "OK");
+            } else {
+                respond(exchange, 404, "Not found");
+            }
+        }));
+        server.createContext("/api/register", safe(AuthServer::register));
+        server.createContext("/api/login", safe(AuthServer::login));
+
+        // Periodically drop stale rate-limit entries so the map can't grow forever.
+        ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "limiter-cleanup");
+            thread.setDaemon(true);
+            return thread;
+        });
+        cleaner.scheduleAtFixedRate(() -> LIMITER.cleanup(2 * 60 * 60_000L), 10, 10, TimeUnit.MINUTES);
+
         initializeDatabase();
         server.start();
         System.out.println("Auth API listening on port " + port);
     }
 
-    private static void staticFile(HttpExchange exchange) throws IOException {
-        String method = exchange.getRequestMethod();
-        boolean isHead = "HEAD".equalsIgnoreCase(method);
-        if (!"GET".equalsIgnoreCase(method) && !isHead) {
-            exchange.getResponseHeaders().set("Allow", "GET, HEAD");
-            respond(exchange, 405, "Method not allowed");
-            return;
-        }
-
-        String requestPath = exchange.getRequestURI().getPath();
-        String relativePath = "/".equals(requestPath) ? "index.html" : requestPath.substring(1);
-        File file = new File(relativePath).getCanonicalFile();
-        File root = new File(".").getCanonicalFile();
-
-        if (!file.toPath().startsWith(root.toPath()) || !file.isFile()) {
-            // No index.html on disk (this backend has no bundled frontend) -- still
-            // return 200 with no body for a HEAD health check on "/" specifically,
-            // so platform health checks see a healthy status rather than a 404.
-            if (isHead && "/".equals(requestPath)) {
-                exchange.getResponseHeaders().set("Content-Length", "0");
-                exchange.sendResponseHeaders(200, -1);
-                exchange.close();
-                return;
+    /** Wraps a handler so no exception escapes and drops the connection. */
+    private static HttpHandler safe(HttpHandler handler) {
+        return exchange -> {
+            try {
+                handler.handle(exchange);
+            } catch (BadRequest error) {
+                respond(exchange, 400, error.getMessage());
+            } catch (Exception error) {
+                error.printStackTrace();
+                try {
+                    respond(exchange, 500, "Server error");
+                } catch (Exception ignored) {
+                    exchange.close();
+                }
             }
-            respond(exchange, 404, "Not found");
-            return;
-        }
-
-        String contentType = URLConnection.guessContentTypeFromName(file.getName());
-        if (contentType != null) {
-            exchange.getResponseHeaders().set("Content-Type", contentType);
-        }
-        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-
-        if (isHead) {
-            exchange.getResponseHeaders().set("Content-Length", String.valueOf(file.length()));
-            exchange.sendResponseHeaders(200, -1);
-            exchange.close();
-            return;
-        }
-
-        exchange.sendResponseHeaders(200, file.length());
-        try (InputStream input = new FileInputStream(file);
-             OutputStream output = exchange.getResponseBody()) {
-            input.transferTo(output);
-        }
+        };
     }
 
     private static void register(HttpExchange exchange) throws IOException {
         if (!isPost(exchange)) return;
+
+        String ip = clientIp(exchange);
+        String ipKey = "register:ip:" + ip;
+        if (LIMITER.isLimited(ipKey, REGISTER_MAX_PER_IP, REGISTER_WINDOW_MS)) {
+            respond(exchange, 429, "Too many attempts. Try again later.");
+            return;
+        }
+        LIMITER.record(ipKey);
+
         Map<String, String> data = parseForm(exchange);
-        String email = data.getOrDefault("email", "").trim().toLowerCase();
+        String email = data.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
         String password = data.getOrDefault("password", "");
         String firstName = data.getOrDefault("first_name", "").trim();
         String lastName = data.getOrDefault("last_name", "").trim();
         String dobRaw = data.getOrDefault("date_of_birth", "").trim();
 
-        if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$") || password.length() < 6 || password.length() > 128) {
+        if (email.length() > 254 || !EMAIL.matcher(email).matches()
+                || password.length() < 6 || password.length() > 128) {
             respond(exchange, 400, "Invalid email or password");
             return;
         }
-        if (firstName.isEmpty() || lastName.isEmpty()) {
-            respond(exchange, 400, "First and last name are required");
+        if (!validName(firstName) || !validName(lastName)) {
+            respond(exchange, 400, "Names may contain only letters, spaces, apostrophes and hyphens (max 50)");
             return;
         }
 
-        // Date of birth is treated as optional at the database level (nullable
-        // column) so a missing/malformed value never blocks account creation --
-        // only credentials are actually required to register.
+        // Date of birth is optional; a missing/malformed/implausible value never blocks signup.
         java.sql.Date dob = null;
         if (!dobRaw.isEmpty()) {
             try {
-                dob = java.sql.Date.valueOf(dobRaw); // expects yyyy-MM-dd, matching Python's date.isoformat()
-            } catch (IllegalArgumentException ignored) {
+                LocalDate parsed = LocalDate.parse(dobRaw); // yyyy-MM-dd
+                if (!parsed.isAfter(LocalDate.now()) && parsed.getYear() >= 1900) {
+                    dob = java.sql.Date.valueOf(parsed);
+                }
+            } catch (RuntimeException ignored) {
                 dob = null;
             }
         }
@@ -129,17 +205,18 @@ public final class AuthServer {
         RANDOM.nextBytes(salt);
         try (Connection connection = database();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT INTO users (email, password_hash, password_salt, first_name, last_name, date_of_birth) "
-                             + "VALUES (?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO users (email, password_hash, password_salt, password_iterations, first_name, last_name, date_of_birth) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
             statement.setString(1, email);
-            statement.setString(2, hash(password, salt));
+            statement.setString(2, hash(password, salt, ITERATIONS));
             statement.setBytes(3, salt);
-            statement.setString(4, firstName);
-            statement.setString(5, lastName);
+            statement.setInt(4, ITERATIONS);
+            statement.setString(5, firstName);
+            statement.setString(6, lastName);
             if (dob != null) {
-                statement.setDate(6, dob);
+                statement.setDate(7, dob);
             } else {
-                statement.setNull(6, java.sql.Types.DATE);
+                statement.setNull(7, java.sql.Types.DATE);
             }
             statement.executeUpdate();
             respond(exchange, 201, "Account created");
@@ -155,33 +232,121 @@ public final class AuthServer {
 
     private static void login(HttpExchange exchange) throws IOException {
         if (!isPost(exchange)) return;
+
         Map<String, String> data = parseForm(exchange);
-        String email = data.getOrDefault("email", "").trim().toLowerCase();
+        String email = data.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
         String password = data.getOrDefault("password", "");
+        String ip = clientIp(exchange);
+        String emailKey = "login:email:" + email;
+        String ipKey = "login:ip:" + ip;
+
+        if (LIMITER.isLimited(emailKey, LOGIN_MAX_FAILS_PER_EMAIL, LOGIN_WINDOW_MS)
+                || LIMITER.isLimited(ipKey, LOGIN_MAX_FAILS_PER_IP, LOGIN_WINDOW_MS)) {
+            respond(exchange, 429, "Too many attempts. Try again later.");
+            return;
+        }
+
+        // Reject junk before doing expensive hashing or touching the database.
+        if (email.length() > 254 || !EMAIL.matcher(email).matches()
+                || password.isEmpty() || password.length() > 128) {
+            LIMITER.record(ipKey);
+            respond(exchange, 401, "Invalid email or password");
+            return;
+        }
 
         try (Connection connection = database();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT password_hash, password_salt, first_name FROM users WHERE email = ?")) {
+                     "SELECT password_hash, password_salt, password_iterations, first_name FROM users WHERE email = ?")) {
             statement.setString(1, email);
+
+            boolean authenticated = false;
+            boolean needsUpgrade = false;
+            String firstName = null;
+
             try (ResultSet result = statement.executeQuery()) {
-                if (result.next() && hash(password, result.getBytes("password_salt")).equals(result.getString("password_hash"))) {
-                    String firstName = result.getString("first_name");
-                    if (firstName == null || firstName.isBlank()) {
-                        // Accounts created before the name fields existed (or with a blank
-                        // value) fall back to something readable instead of a blank name.
-                        String localPart = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
-                        firstName = localPart.isEmpty() ? "Member" : Character.toUpperCase(localPart.charAt(0)) + localPart.substring(1);
+                if (result.next()) {
+                    int iterations = result.getInt("password_iterations");
+                    if (iterations <= 0) iterations = LEGACY_ITERATIONS;
+                    String computed = hash(password, result.getBytes("password_salt"), iterations);
+                    authenticated = MessageDigest.isEqual(
+                            computed.getBytes(StandardCharsets.UTF_8),
+                            result.getString("password_hash").getBytes(StandardCharsets.UTF_8));
+                    if (authenticated) {
+                        needsUpgrade = iterations < ITERATIONS;
+                        firstName = result.getString("first_name");
                     }
-                    String json = "{\"message\":\"Signed in\",\"first_name\":\"" + jsonEscape(firstName) + "\"}";
-                    respondJson(exchange, 200, json);
                 } else {
-                    respond(exchange, 401, "Invalid email or password");
+                    // Unknown email: do equivalent work so response time doesn't reveal it.
+                    hash(password, DUMMY_SALT, ITERATIONS);
                 }
             }
+
+            if (!authenticated) {
+                LIMITER.record(emailKey);
+                LIMITER.record(ipKey);
+                respond(exchange, 401, "Invalid email or password");
+                return;
+            }
+
+            LIMITER.clear(emailKey);
+
+            if (needsUpgrade) {
+                // Transparently re-hash with the stronger iteration count and a fresh salt.
+                try {
+                    byte[] newSalt = new byte[16];
+                    RANDOM.nextBytes(newSalt);
+                    try (PreparedStatement upgrade = connection.prepareStatement(
+                            "UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE email = ?")) {
+                        upgrade.setString(1, hash(password, newSalt, ITERATIONS));
+                        upgrade.setBytes(2, newSalt);
+                        upgrade.setInt(3, ITERATIONS);
+                        upgrade.setString(4, email);
+                        upgrade.executeUpdate();
+                    }
+                } catch (SQLException upgradeError) {
+                    upgradeError.printStackTrace(); // login still succeeds
+                }
+            }
+
+            // Legacy rows may hold unvalidated names; only return safe values.
+            if (firstName == null || firstName.isBlank() || !validName(firstName.trim())) {
+                String localPart = email.substring(0, email.indexOf('@')); // EMAIL regex guarantees '@'
+                firstName = Character.toUpperCase(localPart.charAt(0)) + localPart.substring(1);
+            } else {
+                firstName = firstName.trim();
+            }
+
+            String json = "{\"message\":\"Signed in\",\"first_name\":\"" + jsonEscape(firstName) + "\"}";
+            respondJson(exchange, 200, json);
         } catch (SQLException error) {
             error.printStackTrace();
             respond(exchange, 500, "Database error");
         }
+    }
+
+    private static boolean validName(String value) {
+        return value.length() >= 1 && value.length() <= 50 && NAME.matcher(value).matches();
+    }
+
+    private static String clientIp(HttpExchange exchange) {
+        // Streamlit calls this API server-to-server, so without help every user would look
+        // like the same IP. If Streamlit proves who it is with the shared secret, trust the
+        // end-user IP it forwards; anyone else can't spoof it.
+        String key = exchange.getRequestHeaders().getFirst("X-Api-Key");
+        String forwardedClient = exchange.getRequestHeaders().getFirst("X-Client-IP");
+        if (API_SECRET != null && !API_SECRET.isBlank() && key != null && forwardedClient != null
+                && MessageDigest.isEqual(key.getBytes(StandardCharsets.UTF_8),
+                                         API_SECRET.getBytes(StandardCharsets.UTF_8))
+                && IP_LIKE.matcher(forwardedClient.trim()).matches()) {
+            return forwardedClient.trim();
+        }
+
+        // Otherwise: behind Render's proxy the real client is in X-Forwarded-For.
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return exchange.getRemoteAddress().getAddress().getHostAddress();
     }
 
     private static Connection database() throws SQLException {
@@ -226,14 +391,14 @@ public final class AuthServer {
                     "CREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash TEXT NOT NULL, password_salt BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")) {
                 statement.executeUpdate();
             }
-            // Added after the original table was already deployed, so these are applied
-            // as an idempotent migration (safe to run on every startup, including against
-            // a table that already has these columns or already has existing rows).
+            // Idempotent migration (safe on every startup). Existing rows get
+            // password_iterations = 210000, which matches how they were hashed.
             try (PreparedStatement statement = connection.prepareStatement(
                     "ALTER TABLE users "
                             + "ADD COLUMN IF NOT EXISTS first_name VARCHAR(100), "
                             + "ADD COLUMN IF NOT EXISTS last_name VARCHAR(100), "
-                            + "ADD COLUMN IF NOT EXISTS date_of_birth DATE")) {
+                            + "ADD COLUMN IF NOT EXISTS date_of_birth DATE, "
+                            + "ADD COLUMN IF NOT EXISTS password_iterations INTEGER NOT NULL DEFAULT 210000")) {
                 statement.executeUpdate();
             }
         }
@@ -245,9 +410,9 @@ public final class AuthServer {
         return value;
     }
 
-    private static String hash(String password, byte[] salt) {
+    private static String hash(String password, byte[] salt, int iterations) {
         try {
-            KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH);
+            KeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH);
             byte[] encoded = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
             return Base64.getEncoder().encodeToString(encoded);
         } catch (NoSuchAlgorithmException | InvalidKeySpecException error) {
@@ -257,11 +422,19 @@ public final class AuthServer {
 
     private static Map<String, String> parseForm(HttpExchange exchange) throws IOException {
         try (InputStream input = exchange.getRequestBody()) {
-            String body = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            byte[] bytes = input.readNBytes(MAX_BODY + 1);
+            if (bytes.length > MAX_BODY) throw new BadRequest("Request too large");
             Map<String, String> values = new HashMap<>();
-            for (String pair : body.split("&")) {
-                String[] parts = pair.split("=", 2);
-                if (parts.length == 2) values.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8), URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+            try {
+                for (String pair : new String(bytes, StandardCharsets.UTF_8).split("&")) {
+                    String[] parts = pair.split("=", 2);
+                    if (parts.length == 2) {
+                        values.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                                   URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+                    }
+                }
+            } catch (IllegalArgumentException error) {
+                throw new BadRequest("Malformed request");
             }
             return values;
         }
@@ -283,18 +456,12 @@ public final class AuthServer {
     }
 
     private static void writeResponse(HttpExchange exchange, int status, String contentType, byte[] body) throws IOException {
-        // Inject Essential Global CORS Metadata Elements
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
+        // No CORS headers: Streamlit calls this API server-to-server, so browsers never need access.
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
 
-        // HEAD requests (e.g. Render's health check pinging "/") must carry the
-        // same Content-Length a GET would return, but no body. Passing the real
-        // body length to sendResponseHeaders on a HEAD request triggers a JDK
-        // warning, so we set Content-Length manually and send -1 (no body) instead.
+        // HEAD (e.g. Render's health check) gets the same Content-Length a GET would, but no body.
         if ("HEAD".equalsIgnoreCase(exchange.getRequestMethod())) {
             exchange.getResponseHeaders().set("Content-Length", String.valueOf(body.length));
             exchange.sendResponseHeaders(status, -1);
@@ -308,12 +475,22 @@ public final class AuthServer {
         }
     }
 
-    /** Minimal JSON string escaping -- good enough for names/emails, not a general-purpose encoder. */
+    /** JSON string escaping, including all control characters below 0x20. */
     private static String jsonEscape(String value) {
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        StringBuilder out = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\': out.append("\\\\"); break;
+                case '"':  out.append("\\\""); break;
+                case '\n': out.append("\\n"); break;
+                case '\r': out.append("\\r"); break;
+                case '\t': out.append("\\t"); break;
+                default:
+                    if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
+                    else out.append(c);
+            }
+        }
+        return out.toString();
     }
 }
