@@ -456,8 +456,8 @@ def show_registration_dialog():
             elif response.status_code == 400:
                 st.error("Please check your details and try again.")
             else:
-                st.error("Something went wrong. Please try again.")
-
+                st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
+                print("Register failed:", response.status_code, response.text)
 # =========================================================================
 # 3. INTERACTION FEEDS & PLATFORM WORKSPACES
 # =========================================================================
@@ -470,7 +470,7 @@ def landing_page():
     elif st.session_state.signup_step == "plan":
         show_registration_dialog()
 
-    # Top bar: empty left | NETCHILL centered | Sign In on the right
+    # Top bar: empty left | NETCHILL centered | Sign In on the right side 
     nav_left, nav_center, nav_right = st.columns([3, 4, 3])
     with nav_center:
         st.markdown(
