@@ -1,4 +1,5 @@
 import os
+import time
 import html
 import random
 import hashlib
@@ -44,6 +45,52 @@ def _backend_headers() -> dict:
         except Exception:
             pass  # older Streamlit without st.context: backend falls back to its own detection
     return headers
+
+# Render's free tier puts the backend to sleep when idle. While it boots, Render's proxy
+# answers 502/503/504 (or the connection fails), so we retry instead of showing an error.
+WAKE_STATUSES = (502, 503, 504)
+WAKE_MAX_ATTEMPTS = int(os.getenv("WAKE_MAX_ATTEMPTS", "6"))
+WAKE_RETRY_DELAY = int(os.getenv("WAKE_RETRY_DELAY", "10"))
+
+def post_to_backend(path: str, data: dict):
+    """POST form data to the backend, retrying while a sleeping backend wakes up.
+
+    Returns the final Response (which may still be a 502/503/504 if the backend never
+    came up). Raises requests.RequestException if it could never be reached at all.
+    Only gateway errors and failed connections are retried, because in both cases the
+    backend never processed the request, so a retry can't create a duplicate account.
+    """
+    notice = st.empty()
+    response = None
+    last_error = None
+    for attempt in range(WAKE_MAX_ATTEMPTS):
+        try:
+            response = requests.post(
+                f"{BACKEND_API_URL}{path}",
+                data=data,
+                headers=_backend_headers(),
+                timeout=REQUEST_TIMEOUT,
+            )
+            last_error = None
+            if response.status_code not in WAKE_STATUSES:
+                break
+        except requests.ConnectionError as exc:  # includes connect timeouts
+            last_error = exc
+            response = None
+        if attempt < WAKE_MAX_ATTEMPTS - 1:
+            notice.info("Waking up the server, this can take up to a minute...")
+            time.sleep(WAKE_RETRY_DELAY)
+    notice.empty()
+    if response is None and last_error is not None:
+        raise last_error
+    return response
+
+def show_backend_error(response):
+    """Friendly message for unexpected backend responses (status code kept for debugging)."""
+    if response.status_code in WAKE_STATUSES:
+        st.error("The server is still starting up. Please wait a minute and try again.")
+    else:
+        st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
@@ -357,12 +404,7 @@ def show_login_dialog():
         else:
             try:
                 # Java accepts form URL encoding (x-www-form-urlencoded) parameters natively
-                response = requests.post(
-                    f"{BACKEND_API_URL}/api/login",
-                    data={"email": email, "password": password},
-                    headers=_backend_headers(),
-                    timeout=REQUEST_TIMEOUT,
-                )
+                response = post_to_backend("/api/login", {"email": email, "password": password})
             except requests.RequestException:
                 st.error("Can't reach the server. Please try again later.")
                 return
@@ -385,7 +427,7 @@ def show_login_dialog():
             elif response.status_code == 401:
                 st.error("Incorrect email or password.")
             else:
-                st.error("Something went wrong. Please try again.")
+                show_backend_error(response)
 
 @st.dialog("Tell Us About You")
 def show_personal_info_dialog():
@@ -436,7 +478,7 @@ def show_registration_dialog():
                 "date_of_birth": st.session_state.signup_dob.isoformat() if st.session_state.signup_dob else "",
             }
             try:
-                response = requests.post(f"{BACKEND_API_URL}/api/register", data=payload, headers=_backend_headers(), timeout=REQUEST_TIMEOUT)
+                response = post_to_backend("/api/register", payload)
             except requests.RequestException:
                 st.error("Can't reach the server. Please try again later.")
                 return
@@ -456,8 +498,8 @@ def show_registration_dialog():
             elif response.status_code == 400:
                 st.error("Please check your details and try again.")
             else:
-                st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
-                print("Register failed:", response.status_code, response.text)
+                show_backend_error(response)
+
 # =========================================================================
 # 3. INTERACTION FEEDS & PLATFORM WORKSPACES
 # =========================================================================
