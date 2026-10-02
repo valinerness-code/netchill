@@ -137,9 +137,34 @@ public final class AuthServer {
         });
         cleaner.scheduleAtFixedRate(() -> LIMITER.cleanup(2 * 60 * 60_000L), 10, 10, TimeUnit.MINUTES);
 
-        initializeDatabase();
+        // Open the port FIRST. Render's port scan fails the deploy (and users see 502s) if
+        // the process never listens, e.g. because the database was slow or unreachable.
+        // The schema is set up in the background, retrying until the database answers.
         server.start();
         System.out.println("Auth API listening on port " + port);
+
+        Thread initializer = new Thread(AuthServer::initializeDatabaseWithRetry, "db-init");
+        initializer.setDaemon(true);
+        initializer.start();
+    }
+
+    /** Keeps trying to prepare the schema; failures are printed so they show up in the logs. */
+    private static void initializeDatabaseWithRetry() {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                initializeDatabase();
+                System.out.println("Database ready (attempt " + attempt + ")");
+                return;
+            } catch (Exception error) {
+                System.err.println("Database init failed (attempt " + attempt + "): " + error);
+                try {
+                    Thread.sleep(Math.min(30_000L, 5_000L * attempt));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
     }
 
     /** Wraps a handler so no exception escapes and drops the connection. */
