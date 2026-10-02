@@ -47,50 +47,70 @@ def _backend_headers() -> dict:
     return headers
 
 # Render's free tier puts the backend to sleep when idle. While it boots, Render's proxy
-# answers 502/503/504 (or the connection fails), so we retry instead of showing an error.
+# answers 502/503/504 (or the connection fails). We then ping the backend's home page
+# until it answers, showing progress, and only then send the real request again.
 WAKE_STATUSES = (502, 503, 504)
-WAKE_MAX_ATTEMPTS = int(os.getenv("WAKE_MAX_ATTEMPTS", "24"))  # 24 attempts * 10s = 4 minutes max
-WAKE_RETRY_DELAY = int(os.getenv("WAKE_RETRY_DELAY", "10"))
+WAKE_MAX_SECONDS = int(os.getenv("WAKE_MAX_SECONDS", "240"))
+WAKE_PING_TIMEOUT = 15
+
+def _wake_backend(notice, first_problem: str) -> bool:
+    """Ping GET / until the backend answers 200. Returns True once it is awake."""
+    started = time.time()
+    attempt = 0
+    last = first_problem
+    while time.time() - started < WAKE_MAX_SECONDS:
+        attempt += 1
+        try:
+            ping = requests.get(f"{BACKEND_API_URL}/", timeout=WAKE_PING_TIMEOUT)
+            if ping.status_code == 200:
+                print(f"Backend awake after {int(time.time() - started)}s ({attempt} pings)")
+                return True
+            last = f"HTTP {ping.status_code}"
+        except requests.RequestException as exc:
+            last = type(exc).__name__
+        elapsed = int(time.time() - started)
+        notice.info(
+            f"Waking up the server, this can take a few minutes... "
+            f"({elapsed}s elapsed, last response: {last})"
+        )
+        time.sleep(3)
+    print(f"Backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})")
+    return False
 
 def post_to_backend(path: str, data: dict):
-    """POST form data to the backend, retrying while a sleeping backend wakes up.
+    """POST form data to the backend, waking it up first if it is asleep.
 
-    Returns the final Response (which may still be a 502/503/504 if the backend never
-    came up). Raises requests.RequestException if it could never be reached at all.
-    Only gateway errors and failed connections are retried, because in both cases the
-    backend never processed the request, so a retry can't create a duplicate account.
+    The request is sent normally first. Only if it fails with a gateway error or a failed
+    connection (the backend never processed it) do we wait for the backend to wake up and
+    send it once more, so a retry can't create a duplicate account.
+    Raises requests.RequestException if the backend never comes up.
     """
+    def send():
+        return requests.post(
+            f"{BACKEND_API_URL}{path}",
+            data=data,
+            headers=_backend_headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+
+    try:
+        response = send()
+        if response.status_code not in WAKE_STATUSES:
+            return response
+        problem = f"HTTP {response.status_code}"
+    except requests.ConnectionError as exc:  # includes connect timeouts
+        problem = type(exc).__name__
+
     notice = st.empty()
-    response = None
-    last_error = None
-    for attempt in range(WAKE_MAX_ATTEMPTS):
-        try:
-            response = requests.post(
-                f"{BACKEND_API_URL}{path}",
-                data=data,
-                headers=_backend_headers(),
-                timeout=REQUEST_TIMEOUT,
-            )
-            last_error = None
-            if response.status_code not in WAKE_STATUSES:
-                break
-        except requests.ConnectionError as exc:  # includes connect timeouts
-            last_error = exc
-            response = None
-        if attempt < WAKE_MAX_ATTEMPTS - 1:
-            notice.info("Waking up the server, this can take up to a minute...")
-            time.sleep(WAKE_RETRY_DELAY)
+    awake = _wake_backend(notice, problem)
     notice.empty()
-    if response is None and last_error is not None:
-        raise last_error
-    return response
+    if not awake:
+        raise requests.ConnectionError("Backend did not wake up in time")
+    return send()
 
 def show_backend_error(response):
-    """Friendly message for unexpected backend responses (status code kept for debugging)."""
-    if response.status_code in WAKE_STATUSES:
-        st.error("The server is still starting up. Please wait a minute and try again.")
-    else:
-        st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
+    """Unexpected backend response: keep the status code visible for debugging."""
+    st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
@@ -406,7 +426,7 @@ def show_login_dialog():
                 # Java accepts form URL encoding (x-www-form-urlencoded) parameters natively
                 response = post_to_backend("/api/login", {"email": email, "password": password})
             except requests.RequestException:
-                st.error("Can't reach the server. Please try again later.")
+                st.error("Can't reach the server right now. Please wait a minute and try again.")
                 return
 
             if response.status_code == 200:
@@ -480,7 +500,7 @@ def show_registration_dialog():
             try:
                 response = post_to_backend("/api/register", payload)
             except requests.RequestException:
-                st.error("Can't reach the server. Please try again later.")
+                st.error("Can't reach the server right now. Please wait a minute and try again.")
                 return
 
             if response.status_code == 201:
