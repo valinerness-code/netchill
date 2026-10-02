@@ -115,6 +115,15 @@ def _poster_palette(title: str):
     idx = int(hashlib.md5(title.encode()).hexdigest(), 16) % len(_PALETTES)
     return _PALETTES[idx]
 
+def _title_font_cqw(title: str, cap: float, usable: float = 88.0, char_w: float = 0.86) -> float:
+    """Font size (in cqw = % of the tile's width) so the longest word fits on one line.
+    char_w is a safe average width of a bold uppercase Georgia letter, in em."""
+    longest = max((len(w) for w in title.split()), default=1)
+    return round(min(cap, usable / (longest * char_w)), 2)
+
+_TITLE_FIT_CSS = ("overflow-wrap:normal; word-break:keep-all; hyphens:manual; "
+                  "text-wrap:balance; ")
+
 _WALL_TITLES = [
     "Midnight Run", "Skyline", "Crimson Tide", "Neon Glow", "Nightfall",
     "Signal Ridge", "Glass City", "Thorn Lane", "Last Harbor", "Iron Orchard",
@@ -138,12 +147,13 @@ def build_hero_poster_wall_html(cols: int = 5, rows: int = 3) -> str:
             bg = f"linear-gradient(155deg, {c1} 0%, {c2} 100%)"
         title = html.escape(titles[i])
         tiles.append(
-            f'<div style="background: {bg}; position: relative; overflow: hidden;">'
+            f'<div style="background: {bg}; position: relative; overflow: hidden; container-type:inline-size;">'
             f'<div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 55%);"></div>'
             f'<div style="position:absolute; left:10px; right:10px; bottom:14px; text-align:center; '
             f"font-family:Georgia,'Times New Roman',serif; font-weight:900; text-transform:uppercase; "
-            f'font-size:clamp(0.9rem,1.8vw,1.6rem); line-height:1.1; color:#fff; '
-            f'text-shadow:0 3px 10px rgba(0,0,0,0.8); overflow-wrap:break-word;">{title}</div>'
+            f'font-size:clamp(0.9rem,1.8vw,1.6rem); font-size:{_title_font_cqw(titles[i], 9, 84)}cqw; '
+            f'line-height:1.1; color:#fff; {_TITLE_FIT_CSS}'
+            f'text-shadow:0 3px 10px rgba(0,0,0,0.8);">{title}</div>'
             f'</div>'
         )
     result = f"""
@@ -167,7 +177,9 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     if rating is None:
         rating = f"{(int(hashlib.md5((title+'r').encode()).hexdigest(), 16) % 25 + 70) / 10:.1f}"
     n = len(title)
-    font_size = 1.6 if n <= 12 else 1.3 if n <= 20 else 1.05
+    cap = 12 if n <= 12 else 10 if n <= 20 else 8.5
+    font_cqw = _title_font_cqw(title, cap)
+    font_size = 1.6 if n <= 12 else 1.3 if n <= 20 else 1.05  # fallback for old browsers
     safe_title = html.escape(title)
     safe_genre = html.escape(genre)
     safe_rating = html.escape(str(rating))
@@ -179,7 +191,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
         border: 1px solid rgba(255,255,255,0.08);
         display:flex; flex-direction:column; justify-content:space-between;
         padding:14px; box-sizing:border-box;
-        margin-bottom:8px;
+        margin-bottom:8px; container-type:inline-size;
     ">
         <div style="display:flex; justify-content:space-between; align-items:flex-start;">
             <span style="
@@ -190,13 +202,13 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
                 background:rgba(0,0,0,0.45); color:#fff; font-size:0.75rem;
                 font-weight:700; padding:2px 8px; border-radius:4px;">★ {safe_rating}</span>
         </div>
-        <div style="text-align:center; min-width:0;">
+        <div style="flex:1; min-height:0; min-width:0; display:flex; align-items:center; justify-content:center; text-align:center;">
             <div style="
                 font-family: Georgia, 'Times New Roman', serif; font-weight:900;
-                font-size:{font_size}rem; line-height:1.1; color:#fff; text-transform:uppercase;
+                font-size:{font_size}rem; font-size:{font_cqw}cqw;
+                line-height:1.1; color:#fff; text-transform:uppercase;
                 text-shadow: 0 3px 10px rgba(0,0,0,0.6);
-                overflow-wrap:break-word; word-break:normal; hyphens:auto;
-                display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+                {_TITLE_FIT_CSS}
             ">{safe_title}</div>
         </div>
         <div style="
@@ -462,7 +474,9 @@ def landing_page():
     nav_left, nav_center, nav_right = st.columns([3, 4, 3])
     with nav_center:
         st.markdown(
-            '<div class="brand-title" style="text-align:center; font-size:4rem;">NETCHILL</div>',
+            '<div class="brand-title" style="text-align:center; font-size:4rem;">NETCHILL</div>'
+            '<div style="text-align:center; color:#E50914; font-weight:700; text-transform:uppercase; '
+            'font-size:1.8rem; letter-spacing:2px; margin-top:-8px;">New &amp; trending</div>',
             unsafe_allow_html=True,
         )
     with nav_right:
@@ -472,15 +486,14 @@ def landing_page():
                 show_login_dialog()
 
     st.write("")
-    st.markdown('<p style="color: #E50914; font-weight: 700; text-transform: uppercase;">New & trending</p>', unsafe_allow_html=True)
     st.markdown('<h1 class="hero-title">Unlimited movies, TV shows, and more.</h1>', unsafe_allow_html=True)
     st.markdown('<h5>Watch anywhere. Cancel anytime.</h5>', unsafe_allow_html=True)
 
     # Push the email box and button further down the page
     st.markdown('<div style="height:160px;"></div>', unsafe_allow_html=True)
 
-    # Email box and button are each half their old width (25% of the page each)
-    col_em, col_btn, _rest = st.columns([1, 1, 2])
+    # Email box and button are each 25% of the page width, pushed to the right side
+    _rest, col_em, col_btn = st.columns([2, 1, 1])
     with col_em:
         hero_email = st.text_input("Email address", placeholder="Email address", label_visibility="collapsed", key="hero_email_input", max_chars=254)
     with col_btn:
