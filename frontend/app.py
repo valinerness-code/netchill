@@ -49,7 +49,7 @@ def _backend_headers() -> dict:
 # Render's free tier puts the backend to sleep when idle. While it boots, Render's proxy
 # answers 502/503/504 (or the connection fails), so we retry instead of showing an error.
 WAKE_STATUSES = (502, 503, 504)
-WAKE_MAX_ATTEMPTS = int(os.getenv("WAKE_MAX_ATTEMPTS", "6"))
+WAKE_MAX_ATTEMPTS = int(os.getenv("WAKE_MAX_ATTEMPTS", "24"))  # 24 attempts * 10s = 4 minutes max
 WAKE_RETRY_DELAY = int(os.getenv("WAKE_RETRY_DELAY", "10"))
 
 def post_to_backend(path: str, data: dict):
