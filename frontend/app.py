@@ -64,18 +64,19 @@ def _wake_backend(notice, first_problem: str) -> bool:
         try:
             ping = requests.get(f"{BACKEND_API_URL}/", timeout=WAKE_PING_TIMEOUT)
             if ping.status_code == 200:
-                print(f"Backend awake after {int(time.time() - started)}s ({attempt} pings)")
+                print(f"[wake] backend awake after {int(time.time() - started)}s ({attempt} pings)", flush=True)
                 return True
             last = f"HTTP {ping.status_code}"
         except requests.RequestException as exc:
             last = type(exc).__name__
+        print(f"[wake] ping {attempt} at {int(time.time() - started)}s -> {last}", flush=True)
         elapsed = int(time.time() - started)
         notice.info(
             f"Waking up the server, this can take a few minutes... "
             f"({elapsed}s elapsed, last response: {last}, checking {BACKEND_API_URL})"
         )
         time.sleep(3)
-    print(f"Backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})")
+    print(f"[wake] backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})", flush=True)
     return False
 
 def post_to_backend(path: str, data: dict):
@@ -113,18 +114,57 @@ def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-def _prewarm_backend():
+APP_BUILD = "wake-v4-debug"
+
+def _prewarm_backend(info: dict):
     """Fire-and-forget ping so a sleeping backend starts waking up as soon as someone
-    opens the site, instead of only when they press Sign up. Never touches Streamlit."""
-    try:
-        requests.get(f"{BACKEND_API_URL}/", timeout=240)
-    except requests.RequestException:
-        pass
+    opens the site, instead of only when they press Sign up. Never touches Streamlit
+    (it only updates the plain dict it is given). Outcomes are also printed to the logs."""
+    attempts = [
+        ("default headers", {}),
+        ("browser-like headers", {
+            "User-Agent": "Mozilla/5.0 (compatible; NetchillFrontend)",
+            "Accept": "text/html,*/*",
+        }),
+    ]
+    for label, headers in attempts:
+        began = time.time()
+        info["state"] = f"running ({label})..."
+        try:
+            reply = requests.get(f"{BACKEND_API_URL}/", headers=headers, timeout=240)
+            took = time.time() - began
+            info["state"] = f"({label}) HTTP {reply.status_code} after {took:.0f}s"
+            print(f"[prewarm] {info['state']}", flush=True)
+            if reply.status_code == 200:
+                return
+        except requests.RequestException as exc:
+            took = time.time() - began
+            info["state"] = f"({label}) {type(exc).__name__} after {took:.0f}s"
+            print(f"[prewarm] {info['state']}", flush=True)
+        time.sleep(5)
 
 # Once per visitor session (Streamlit reruns this script on every interaction).
 if not st.session_state.get("backend_prewarmed"):
     st.session_state["backend_prewarmed"] = True
-    threading.Thread(target=_prewarm_backend, daemon=True).start()
+    st.session_state["prewarm_info"] = {"state": "starting..."}
+    print(f"[netchill-frontend] build={APP_BUILD} backend={BACKEND_API_URL}", flush=True)
+    threading.Thread(
+        target=_prewarm_backend, args=(st.session_state["prewarm_info"],), daemon=True
+    ).start()
+
+# Open the site with ?debug=1 on the end of the address to see this panel.
+if st.query_params.get("debug") == "1":
+    with st.expander("Connection diagnostics", expanded=True):
+        st.write(f"Build: {APP_BUILD}")
+        st.write(f"Backend address: {BACKEND_API_URL}")
+        st.write(f"Wake-up ping: {st.session_state.get('prewarm_info', {}).get('state', 'not run')}")
+        if st.button("Ping backend now"):
+            t0 = time.time()
+            try:
+                r = requests.get(f"{BACKEND_API_URL}/", timeout=120)
+                st.write(f"Result: HTTP {r.status_code} after {time.time() - t0:.1f}s")
+            except requests.RequestException as exc:
+                st.write(f"Result: {type(exc).__name__} after {time.time() - t0:.1f}s")
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
