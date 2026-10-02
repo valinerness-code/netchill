@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 import html
 import random
 import hashlib
@@ -71,7 +72,7 @@ def _wake_backend(notice, first_problem: str) -> bool:
         elapsed = int(time.time() - started)
         notice.info(
             f"Waking up the server, this can take a few minutes... "
-            f"({elapsed}s elapsed, last response: {last})"
+            f"({elapsed}s elapsed, last response: {last}, checking {BACKEND_API_URL})"
         )
         time.sleep(3)
     print(f"Backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})")
@@ -111,6 +112,19 @@ def post_to_backend(path: str, data: dict):
 def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
+
+def _prewarm_backend():
+    """Fire-and-forget ping so a sleeping backend starts waking up as soon as someone
+    opens the site, instead of only when they press Sign up. Never touches Streamlit."""
+    try:
+        requests.get(f"{BACKEND_API_URL}/", timeout=240)
+    except requests.RequestException:
+        pass
+
+# Once per visitor session (Streamlit reruns this script on every interaction).
+if not st.session_state.get("backend_prewarmed"):
+    st.session_state["backend_prewarmed"] = True
+    threading.Thread(target=_prewarm_backend, daemon=True).start()
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
