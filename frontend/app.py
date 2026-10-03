@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import threading
 import html
@@ -114,7 +115,7 @@ def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-APP_BUILD = "wake-v4-debug"
+APP_BUILD = "wake-v5-browser"
 
 def _prewarm_backend(info: dict):
     """Fire-and-forget ping so a sleeping backend starts waking up as soon as someone
@@ -151,6 +152,27 @@ if not st.session_state.get("backend_prewarmed"):
     threading.Thread(
         target=_prewarm_backend, args=(st.session_state["prewarm_info"],), daemon=True
     ).start()
+
+# A sleeping Render service wakes when a real browser (or curl) requests it, but requests
+# sent from this server were answered with an instant 502 and did not wake it. So the
+# visitor's own browser pings the backend through a hidden iframe plus a no-cors fetch.
+# The element is re-emitted on reruns for the first 5 minutes so the browser keeps the
+# same iframe instead of reloading it.
+if "browser_warm_started" not in st.session_state:
+    st.session_state["browser_warm_started"] = time.time()
+if time.time() - st.session_state["browser_warm_started"] < 300 and BACKEND_API_URL.startswith("http"):
+    try:
+        import streamlit.components.v1 as components
+        _home = BACKEND_API_URL + "/"
+        components.html(
+            f'<iframe src="{html.escape(_home, quote=True)}" tabindex="-1" aria-hidden="true" '
+            f'style="position:absolute;width:1px;height:1px;opacity:0;border:0"></iframe>'
+            f'<script>fetch({json.dumps(_home)}, {{mode: "no-cors", keepalive: true}})'
+            f'.catch(function () {{}});</script>',
+            height=0,
+        )
+    except Exception as exc:  # never let the warm-up break the page
+        print(f"[browser-wake] skipped: {type(exc).__name__}: {exc}", flush=True)
 
 # Open the site with ?debug=1 on the end of the address to see this panel.
 if st.query_params.get("debug") == "1":
