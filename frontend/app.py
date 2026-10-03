@@ -117,7 +117,7 @@ def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-APP_BUILD = "wake-v8-iframe-and-link"
+APP_BUILD = "wake-v9-future-proof"
 
 # A sleeping Render service wakes when a real browser (or curl) requests it, but requests
 # sent from this server get an instant 502 and do not wake it. So the visitor's own browser
@@ -130,15 +130,21 @@ if "browser_warm_started" not in st.session_state:
 if (BACKEND_API_URL.startswith("http")
         and time.time() - st.session_state["browser_warm_started"] < 300):
     try:
-        import streamlit.components.v1 as components
         _home = BACKEND_API_URL + "/"
-        components.html(
+        _wake_page = (
             f'<iframe src="{html.escape(_home, quote=True)}" tabindex="-1" aria-hidden="true" '
             f'style="position:absolute;width:1px;height:1px;opacity:0;border:0"></iframe>'
             f'<script>fetch({json.dumps(_home)}, {{mode: "no-cors", keepalive: true}})'
-            f'.catch(function () {{}});</script>',
-            height=0,
+            f'.catch(function () {{}});</script>'
         )
+        try:
+            # Proven to work on this deployment, but Streamlit has deprecated it
+            # (it prints a warning and is scheduled for removal).
+            import streamlit.components.v1 as components
+            components.html(_wake_page, height=0)
+        except Exception:
+            # Newer replacement, used automatically once components.html is gone.
+            st.iframe(_wake_page, height=1)
     except Exception as exc:  # never let the warm-up break the page
         print(f"[browser-wake] skipped: {type(exc).__name__}: {exc}", flush=True)
 
