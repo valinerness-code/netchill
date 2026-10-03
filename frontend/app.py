@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import threading
 import html
 import random
 import hashlib
@@ -73,8 +72,11 @@ def _wake_backend(notice, first_problem: str) -> bool:
         print(f"[wake] ping {attempt} at {int(time.time() - started)}s -> {last}", flush=True)
         elapsed = int(time.time() - started)
         notice.info(
-            f"Waking up the server, this can take a few minutes... "
-            f"({elapsed}s elapsed, last response: {last}, checking {BACKEND_API_URL})"
+            f"The server is asleep and needs about a minute to start. "
+            f"**[Click here to wake it up]({BACKEND_API_URL}/)** "
+            f"(opens in a new tab and shows OK when it is ready). "
+            f"This window continues on its own once the server answers. "
+            f"({elapsed}s elapsed, last response: {last})"
         )
         time.sleep(3)
     print(f"[wake] backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})", flush=True)
@@ -115,52 +117,18 @@ def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-APP_BUILD = "wake-v5-browser"
-
-def _prewarm_backend(info: dict):
-    """Fire-and-forget ping so a sleeping backend starts waking up as soon as someone
-    opens the site, instead of only when they press Sign up. Never touches Streamlit
-    (it only updates the plain dict it is given). Outcomes are also printed to the logs."""
-    attempts = [
-        ("default headers", {}),
-        ("browser-like headers", {
-            "User-Agent": "Mozilla/5.0 (compatible; NetchillFrontend)",
-            "Accept": "text/html,*/*",
-        }),
-    ]
-    for label, headers in attempts:
-        began = time.time()
-        info["state"] = f"running ({label})..."
-        try:
-            reply = requests.get(f"{BACKEND_API_URL}/", headers=headers, timeout=240)
-            took = time.time() - began
-            info["state"] = f"({label}) HTTP {reply.status_code} after {took:.0f}s"
-            print(f"[prewarm] {info['state']}", flush=True)
-            if reply.status_code == 200:
-                return
-        except requests.RequestException as exc:
-            took = time.time() - began
-            info["state"] = f"({label}) {type(exc).__name__} after {took:.0f}s"
-            print(f"[prewarm] {info['state']}", flush=True)
-        time.sleep(5)
-
-# Once per visitor session (Streamlit reruns this script on every interaction).
-if not st.session_state.get("backend_prewarmed"):
-    st.session_state["backend_prewarmed"] = True
-    st.session_state["prewarm_info"] = {"state": "starting..."}
-    print(f"[netchill-frontend] build={APP_BUILD} backend={BACKEND_API_URL}", flush=True)
-    threading.Thread(
-        target=_prewarm_backend, args=(st.session_state["prewarm_info"],), daemon=True
-    ).start()
+APP_BUILD = "wake-v8-iframe-and-link"
 
 # A sleeping Render service wakes when a real browser (or curl) requests it, but requests
-# sent from this server were answered with an instant 502 and did not wake it. So the
-# visitor's own browser pings the backend through a hidden iframe plus a no-cors fetch.
-# The element is re-emitted on reruns for the first 5 minutes so the browser keeps the
-# same iframe instead of reloading it.
+# sent from this server get an instant 502 and do not wake it. So the visitor's own browser
+# pings the backend through a hidden iframe plus a no-cors fetch as soon as the page loads.
+# If that does not work, the signup dialog still shows a "click here to wake it up" link.
+# The element is re-emitted on reruns for the first 5 minutes so the browser keeps the same
+# iframe instead of reloading it.
 if "browser_warm_started" not in st.session_state:
     st.session_state["browser_warm_started"] = time.time()
-if time.time() - st.session_state["browser_warm_started"] < 300 and BACKEND_API_URL.startswith("http"):
+if (BACKEND_API_URL.startswith("http")
+        and time.time() - st.session_state["browser_warm_started"] < 300):
     try:
         import streamlit.components.v1 as components
         _home = BACKEND_API_URL + "/"
@@ -179,7 +147,6 @@ if st.query_params.get("debug") == "1":
     with st.expander("Connection diagnostics", expanded=True):
         st.write(f"Build: {APP_BUILD}")
         st.write(f"Backend address: {BACKEND_API_URL}")
-        st.write(f"Wake-up ping: {st.session_state.get('prewarm_info', {}).get('state', 'not run')}")
         if st.button("Ping backend now"):
             t0 = time.time()
             try:
