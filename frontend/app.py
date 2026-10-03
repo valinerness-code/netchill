@@ -24,14 +24,10 @@ def _flatten_html(html_str: str) -> str:
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
-# In production this should be an https:// URL, since passwords travel over it.
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("/")
-# Render's free tier spins services down when idle and a cold start can take ~50s,
-# so the default is generous. Override with the REQUEST_TIMEOUT env var if you like.
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
 
-# Must equal API_SHARED_SECRET on the Java service. Lets the backend trust the end-user
-# IP we forward, so rate limits apply per user instead of to this server as a whole.
+# Must equal API_SHARED_SECRET on the Java service.
 API_SHARED_SECRET = os.getenv("API_SHARED_SECRET", "")
 
 def _backend_headers() -> dict:
@@ -40,16 +36,16 @@ def _backend_headers() -> dict:
         headers["X-Api-Key"] = API_SHARED_SECRET
         try:
             forwarded = st.context.headers.get("X-Forwarded-For", "")
-            client_ip = forwarded.split(",")[0].strip()
+            client_ip = forwarded.split(",").strip()
             if client_ip:
                 headers["X-Client-IP"] = client_ip
         except Exception:
-            pass  # older Streamlit without st.context: backend falls back to its own detection
+            pass  
     return headers
 
 # Render's free tier puts the backend to sleep when idle. While it boots, Render's proxy
-# answers 502/503/504 (or the connection fails). We then ping the backend's home page
-# until it answers, showing progress, and only then send the real request again.
+# answers 502/503/504 (or the connection fails). We ping the backend's home page
+# until it answers, showing progress, and only then re-send the user's request.
 WAKE_STATUSES = (502, 503, 504)
 WAKE_MAX_SECONDS = int(os.getenv("WAKE_MAX_SECONDS", "240"))
 WAKE_PING_TIMEOUT = 15
@@ -82,21 +78,13 @@ def _wake_backend(notice, first_problem: str) -> bool:
     print(f"[wake] backend did not wake up within {WAKE_MAX_SECONDS}s (last: {last})", flush=True)
     return False
 
-def post_to_backend(path: str, data: dict):
-    """POST form data to the backend, waking it up first if it is asleep.
-
-    The request is sent normally first. Only if it fails with a gateway error or a failed
-    connection (the backend never processed it) do we wait for the backend to wake up and
-    send it once more, so a retry can't create a duplicate account.
-    Raises requests.RequestException if the backend never comes up.
-    """
+def execute_backend_request(method: str, path: str, data: dict = None):
+    """Executes a network request (GET or POST) to the backend, waking it up if asleep."""
     def send():
-        return requests.post(
-            f"{BACKEND_API_URL}{path}",
-            data=data,
-            headers=_backend_headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
+        url = f"{BACKEND_API_URL}{path}"
+        if method.upper() == "POST":
+            return requests.post(url, data=data, headers=_backend_headers(), timeout=REQUEST_TIMEOUT)
+        return requests.get(url, headers=_backend_headers(), timeout=REQUEST_TIMEOUT)
 
     try:
         response = send()
@@ -113,40 +101,15 @@ def post_to_backend(path: str, data: dict):
         raise requests.ConnectionError("Backend did not wake up in time")
     return send()
 
+def post_to_backend(path: str, data: dict):
+    """POST form data to the backend, waking it up first if it is asleep."""
+    return execute_backend_request("POST", path, data=data)
+
 def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-APP_BUILD = "wake-v9-future-proof"
-
-# A sleeping Render service wakes when a real browser (or curl) requests it, but requests
-# sent from this server get an instant 502 and do not wake it. So the visitor's own browser
-# pings the backend through a hidden iframe plus a no-cors fetch as soon as the page loads.
-# If that does not work, the signup dialog still shows a "click here to wake it up" link.
-# The element is re-emitted on reruns for the first 5 minutes so the browser keeps the same
-# iframe instead of reloading it.
-if "browser_warm_started" not in st.session_state:
-    st.session_state["browser_warm_started"] = time.time()
-if (BACKEND_API_URL.startswith("http")
-        and time.time() - st.session_state["browser_warm_started"] < 300):
-    try:
-        _home = BACKEND_API_URL + "/"
-        _wake_page = (
-            f'<iframe src="{html.escape(_home, quote=True)}" tabindex="-1" aria-hidden="true" '
-            f'style="position:absolute;width:1px;height:1px;opacity:0;border:0"></iframe>'
-            f'<script>fetch({json.dumps(_home)}, {{mode: "no-cors", keepalive: true}})'
-            f'.catch(function () {{}});</script>'
-        )
-        try:
-            # Proven to work on this deployment, but Streamlit has deprecated it
-            # (it prints a warning and is scheduled for removal).
-            import streamlit.components.v1 as components
-            components.html(_wake_page, height=0)
-        except Exception:
-            # Newer replacement, used automatically once components.html is gone.
-            st.iframe(_wake_page, height=1)
-    except Exception as exc:  # never let the warm-up break the page
-        print(f"[browser-wake] skipped: {type(exc).__name__}: {exc}", flush=True)
+APP_BUILD = "wake-v10-server-routing"
 
 # Open the site with ?debug=1 on the end of the address to see this panel.
 if st.query_params.get("debug") == "1":
@@ -156,7 +119,8 @@ if st.query_params.get("debug") == "1":
         if st.button("Ping backend now"):
             t0 = time.time()
             try:
-                r = requests.get(f"{BACKEND_API_URL}/", timeout=120)
+                # Uses the unified wake engine instead of a raw direct request
+                r = execute_backend_request("GET", "/")
                 st.write(f"Result: HTTP {r.status_code} after {time.time() - t0:.1f}s")
             except requests.RequestException as exc:
                 st.write(f"Result: {type(exc).__name__} after {time.time() - t0:.1f}s")
@@ -169,20 +133,15 @@ EMAIL_REGEX = r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,}$"
 NAME_REGEX = r"^[^\W\d_]+(?:[ '\-][^\W\d_]+)*$"  # letters, spaces, ' and -
 
 def valid_email(s: str) -> bool:
-    # fullmatch (like Java's matches()): plain `$` would also accept a trailing newline
     return len(s) <= 254 and re.fullmatch(EMAIL_REGEX, s) is not None
 
 def valid_name(s: str) -> bool:
-    # \w also admits some non-letters (e.g. superscript digits) that Java's \p{L} rejects,
-    # so additionally require every character to be a real letter, space, ' or -.
     return (
         0 < len(s) <= 50
         and re.fullmatch(NAME_REGEX, s) is not None
         and all(ch.isalpha() or ch in " '-" for ch in s)
     )
 
-# Only allow Unsplash image URLs made of URL-safe characters (no quotes/parens),
-# so a URL can never break out of the CSS url('...') it is placed in.
 _UNSPLASH_URL_RE = re.compile(r"https://images\.unsplash\.com/[A-Za-z0-9._~:/?#\[\]@!$&*+,;=%-]+")
 
 def _safe_image_url(url) -> bool:
@@ -192,7 +151,6 @@ if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
 
 # ---- Unsplash background images ----
-# The old source.unsplash.com/random URL is dead, so we use the official API.
 def _request_unsplash(count: int) -> list:
     r = requests.get(
         "https://api.unsplash.com/photos/random",
@@ -205,12 +163,9 @@ def _request_unsplash(count: int) -> list:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_unsplash(seed: int, count: int) -> list:
-    # Cached for 1 hour so we don't call the API on every rerun.
-    # Errors aren't cached, so a failed call is retried next time.
     return _request_unsplash(count)
 
 def fetch_unsplash_images(seed: int, count: int = 30) -> list:
-    """Returns image URLs, or [] on failure (tiles then use gradients)."""
     if not UNSPLASH_ACCESS_KEY:
         return []
     try:
@@ -219,7 +174,6 @@ def fetch_unsplash_images(seed: int, count: int = 30) -> list:
         return []
 
 # ---- Poster-card generator ---------------------------------------------
-# Movie/TV cards: a gradient picked from the title, plus genre and rating.
 _PALETTES = [
     ("#1f1c2c", "#928dab"), ("#0f2027", "#2c5364"), ("#3a1c71", "#d76d77"),
     ("#0f0c29", "#302b63"), ("#833ab4", "#fd1d1d"), ("#134e5e", "#71b280"),
@@ -232,8 +186,6 @@ def _poster_palette(title: str):
     return _PALETTES[idx]
 
 def _title_font_cqw(title: str, cap: float, usable: float = 88.0, char_w: float = 0.86) -> float:
-    """Font size (in cqw = % of the tile's width) so the longest word fits on one line.
-    char_w is a safe average width of a bold uppercase Georgia letter, in em."""
     longest = max((len(w) for w in title.split()), default=1)
     return round(min(cap, usable / (longest * char_w)), 2)
 
@@ -248,7 +200,6 @@ _WALL_TITLES = [
 ]
 
 def build_hero_poster_wall_html(cols: int = 5, rows: int = 3) -> str:
-    """Full-screen tile grid behind a dark overlay, each tile with a fake title."""
     total = cols * rows
     images = fetch_unsplash_images(st.session_state.bg_seed, total)
     rng = random.Random(st.session_state.bg_seed)
@@ -295,7 +246,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     n = len(title)
     cap = 12 if n <= 12 else 10 if n <= 20 else 8.5
     font_cqw = _title_font_cqw(title, cap)
-    font_size = 1.6 if n <= 12 else 1.3 if n <= 20 else 1.05  # fallback for old browsers
+    font_size = 1.6 if n <= 12 else 1.3 if n <= 20 else 1.05  
     safe_title = html.escape(title)
     safe_genre = html.escape(genre)
     safe_rating = html.escape(str(rating))
@@ -334,7 +285,7 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     """
     return _flatten_html(result)
 
-# 2. Base theme: .stApp is transparent so the background wall shows through.
+# 2. Base theme
 st.markdown(f"""
     <style>
     html, body {{ background: #0b0b0f; }}
@@ -355,7 +306,6 @@ st.markdown(f"""
     .brand-title {{ color: #E50914 !important; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; }}
     .hero-title {{ font-size: 3.5rem; font-weight: 800; line-height: 1.1; margin-bottom: 10px; color: #FFF; }}
 
-    /* Netflix-style row headers */
     .section-title {{
         font-size: 1.4rem; font-weight: 700; margin-top: 28px; margin-bottom: 10px;
         color: #FFF; letter-spacing: 0.2px;
@@ -364,7 +314,6 @@ st.markdown(f"""
     .profile-card {{ text-align: center; background: #222; padding: 25px; border-radius: 8px; border: 2px solid #333; }}
     .profile-card:hover {{ border-color: #E50914; }}
 
-    /* Poster tiles zoom + lift on hover, like a Netflix row card */
     .poster-tile {{
         transition: transform 0.25s ease, box-shadow 0.25s ease;
         transform-origin: center;
@@ -374,11 +323,9 @@ st.markdown(f"""
         box-shadow: 0 16px 34px rgba(0,0,0,0.75) !important;
         z-index: 5;
     }}
-    /* Let the hover scale show instead of being clipped (older + newer Streamlit test ids) */
     div[data-testid="column"], div[data-testid="stColumn"] {{ overflow: visible !important; }}
     div[data-testid="stVerticalBlock"] {{ overflow: visible !important; }}
 
-    /* Primary CTAs -- bold red */
     button[kind="primary"] {{
         background-color: #E50914 !important; color: white !important;
         border: none !important; padding: 0.5rem 1.5rem !important;
@@ -391,7 +338,6 @@ st.markdown(f"""
         box-shadow: 0 6px 16px rgba(229,9,20,0.45);
     }}
 
-    /* Row-action chips -- slim ghost pills */
     button[kind="secondary"] {{
         background-color: rgba(255,255,255,0.10) !important;
         color: #FFF !important;
@@ -409,7 +355,6 @@ st.markdown(f"""
         border-color: #FFFFFF !important;
     }}
 
-    /* Netflix-style top filter tabs (Home / Series / Movies) */
     div[role="radiogroup"] label {{
         font-size: 1rem !important;
         font-weight: 600 !important;
@@ -428,7 +373,7 @@ if "user_email" not in st.session_state:
 if "signup_email" not in st.session_state:
     st.session_state.signup_email = ""
 if "signup_step" not in st.session_state:
-    st.session_state.signup_step = None  # None -> "info" -> "plan"
+    st.session_state.signup_step = None  
 if "signup_first_name" not in st.session_state:
     st.session_state.signup_first_name = ""
 if "signup_last_name" not in st.session_state:
@@ -456,12 +401,11 @@ def sign_out_action():
     st.rerun()
 
 # =========================================================================
-# 2. DIALOG INTERFACES (COMMUNICATES WITH JAVA BACKEND CONTROLLERS)
+# 2. DIALOG INTERFACES
 # =========================================================================
 
 @st.dialog("Sign In")
 def show_login_dialog():
-    """Form-encodes credentials to safely authorize users via Java api/login endpoint"""
     email = st.text_input("Email", placeholder="Enter your email").strip().lower()
     password = st.text_input("Password", type="password", placeholder="Enter your password")
 
@@ -472,7 +416,6 @@ def show_login_dialog():
             st.error("Password must be 6-128 characters.")
         else:
             try:
-                # Java accepts form URL encoding (x-www-form-urlencoded) parameters natively
                 response = post_to_backend("/api/login", {"email": email, "password": password})
             except requests.RequestException:
                 st.error("Can't reach the server right now. Please wait a minute and try again.")
@@ -485,7 +428,7 @@ def show_login_dialog():
                     data = {}
                 name = str(data.get("first_name") or data.get("firstName") or "")[:50]
                 if not valid_name(name):
-                    name = email.split("@")[0]
+                    name = email.split("@")
                 st.session_state.user_email = email
                 st.session_state.logged_in = True
                 st.session_state.user_name = name
@@ -500,7 +443,6 @@ def show_login_dialog():
 
 @st.dialog("Tell Us About You")
 def show_personal_info_dialog():
-    """Step 1 of signup: collect profile basics, Netflix-style. No payment info here or ever."""
     st.text(f"Almost there, {st.session_state.signup_email}. Just a little more about you.")
     first_name = st.text_input("First name", value=st.session_state.signup_first_name, max_chars=50)
     last_name = st.text_input("Last name", value=st.session_state.signup_last_name, max_chars=50)
@@ -523,9 +465,6 @@ def show_personal_info_dialog():
 
 @st.dialog("Start Your Membership")
 def show_registration_dialog():
-    """Step 2 of signup: plan + password. Form-encodes everything, including the
-    name/DOB collected in step 1, to the Java api/register endpoint. Deliberately
-    no credit card / payment fields -- membership stays fake past this point."""
     st.text(f"Hi {st.session_state.signup_first_name} — choose your plan and set a password.")
     plan = st.radio("Choose your plan", ["Basic - $8.99/mo", "Standard - $15.49/mo", "Premium - $22.99/mo"], index=2)
     email = st.text_input("Email address", value=st.session_state.signup_email).strip().lower()
@@ -581,7 +520,6 @@ def landing_page():
     elif st.session_state.signup_step == "plan":
         show_registration_dialog()
 
-    # Top bar: empty left | NETCHILL centered | Sign In on the right side 
     nav_left, nav_center, nav_right = st.columns([3, 4, 3])
     with nav_center:
         st.markdown(
@@ -591,7 +529,7 @@ def landing_page():
             unsafe_allow_html=True,
         )
     with nav_right:
-        _spacer, signin_col = st.columns([1, 1])   # button takes half of this column
+        _spacer, signin_col = st.columns([1, 1])   
         with signin_col:
             if st.button("Sign In", use_container_width=True, type="primary"):
                 show_login_dialog()
@@ -600,10 +538,8 @@ def landing_page():
     st.markdown('<h1 class="hero-title">Unlimited movies, TV shows, and more.</h1>', unsafe_allow_html=True)
     st.markdown('<h5>Watch anywhere. Cancel anytime.</h5>', unsafe_allow_html=True)
 
-    # Push the email box and button further down the page
     st.markdown('<div style="height:160px;"></div>', unsafe_allow_html=True)
 
-    # Email box and button are each 25% of the page width, pushed to the right side
     _rest, col_em, col_btn = st.columns([2, 1, 1])
     with col_em:
         hero_email = st.text_input("Email address", placeholder="Email address", label_visibility="collapsed", key="hero_email_input", max_chars=254)
@@ -666,7 +602,6 @@ def manage_profiles_page():
                 <h3>{html.escape(p['name'])}</h3>
             </div>
             """, unsafe_allow_html=True)
-            # Key by index (not name) so a user named "Mia" or "Kids" can't cause a duplicate-key error.
             if st.button(f"Activate {p['name']}", key=f"set_prof_{idx}", use_container_width=True):
                 st.session_state.current_profile = p['name']
                 st.session_state.profile_color = p['color']
@@ -685,7 +620,7 @@ def account_page():
     for label, value in rows:
         col_lbl, col_val = st.columns(2)
         col_lbl.markdown(f"**{label}**")
-        col_val.text(value)  # plain text: never interpreted as markdown/HTML
+        col_val.text(value)  
 
 def help_page():
     st.markdown('<div class="section-title">Help Center Assistance Dashboard</div>', unsafe_allow_html=True)
