@@ -117,8 +117,6 @@ def show_backend_error(response):
     """Unexpected backend response: keep the status code visible for debugging."""
     st.error(f"Something went wrong (HTTP {response.status_code}). Please try again.")
 
-APP_BUILD = "wake-v10-secretcheck"
-
 # A sleeping Render service wakes when a real browser (or curl) requests it, but requests
 # sent from this server get an instant 502 and do not wake it. So the visitor's own browser
 # pings the backend through a hidden iframe plus a no-cors fetch as soon as the page loads.
@@ -147,29 +145,6 @@ if (BACKEND_API_URL.startswith("http")
             st.iframe(_wake_page, height=1)
     except Exception as exc:  # never let the warm-up break the page
         print(f"[browser-wake] skipped: {type(exc).__name__}: {exc}", flush=True)
-
-# Open the site with ?debug=1 on the end of the address to see this panel.
-if st.query_params.get("debug") == "1":
-    with st.expander("Connection diagnostics", expanded=True):
-        st.write(f"Build: {APP_BUILD}")
-        st.write(f"Backend address: {BACKEND_API_URL}")
-        # Never shows the secret itself, only whether one is set and how long it is.
-        if API_SHARED_SECRET:
-            st.write(f"API_SHARED_SECRET: set ({len(API_SHARED_SECRET)} characters)")
-            if API_SHARED_SECRET != API_SHARED_SECRET.strip():
-                st.write("Warning: the secret has a space or line break at the start or end.")
-        else:
-            st.write("API_SHARED_SECRET: NOT SET (the backend will not trust visitor IPs)")
-        _sent = _backend_headers()
-        st.write(f"Sends X-Api-Key header: {'yes' if 'X-Api-Key' in _sent else 'no'}")
-        st.write(f"Visitor IP forwarded (X-Client-IP): {_sent.get('X-Client-IP', 'none')}")
-        if st.button("Ping backend now"):
-            t0 = time.time()
-            try:
-                r = requests.get(f"{BACKEND_API_URL}/", timeout=120)
-                st.write(f"Result: HTTP {r.status_code} after {time.time() - t0:.1f}s")
-            except requests.RequestException as exc:
-                st.write(f"Result: {type(exc).__name__} after {time.time() - t0:.1f}s")
 
 # Unsplash API key: set it in Render's Environment tab, never in the code.
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
