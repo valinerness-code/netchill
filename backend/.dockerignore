@@ -1,0 +1,13 @@
+# Keep secrets, git history and local build output out of the image build
+.git
+.gitignore
+.env
+.env.*
+*.pem
+*.key
+target/
+.idea/
+.vscode/
+*.iml
+Dockerfile
+.dockerignore

@@ -1,3 +1,4 @@
+import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -5,9 +6,11 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -21,15 +24,18 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import javax.crypto.SecretKeyFactory;
@@ -63,6 +69,37 @@ public final class AuthServer {
     // Optional: lets the Streamlit server forward the real end-user IP (see clientIp).
     private static final String API_SECRET = System.getenv("API_SHARED_SECRET");
     private static final Pattern IP_LIKE = Pattern.compile("^[0-9A-Fa-f:.]{3,45}$");
+    private static final Pattern IPV4 = Pattern.compile(
+            "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$");
+
+    // Header carrying the visitor's IP that the edge in front of this service sets itself.
+    // Render sits behind Cloudflare, which OVERWRITES CF-Connecting-IP, so clients cannot forge
+    // it. X-Forwarded-For is deliberately NOT used: a client can pre-fill it with fake values.
+    // Set CLIENT_IP_HEADER to another header name, or to "none" to disable this source.
+    private static final String CLIENT_IP_HEADER = clientIpHeaderName();
+
+    // Password policy for NEW accounts. Existing accounts can still sign in with what they have.
+    private static final int PASSWORD_MIN_LENGTH = 8;
+    private static final int PASSWORD_MAX_LENGTH = 128;
+    private static final Set<String> COMMON_PASSWORDS = Set.copyOf(Arrays.asList(
+            "password", "password1", "password12", "password123", "password1234", "passw0rd",
+            "p@ssw0rd", "p@ssword", "pa$$word", "12345678", "123456789", "1234567890",
+            "123123123", "11111111", "111111111", "00000000", "87654321", "987654321",
+            "12341234", "12121212", "qwertyui", "qwerty123", "qwertyuiop", "qwerty1234",
+            "asdfghjk", "asdfghjkl", "zxcvbnm1", "1q2w3e4r", "1qaz2wsx", "zaq12wsx",
+            "qazwsxedc", "q1w2e3r4", "abc12345", "abcd1234", "abcdefgh", "iloveyou",
+            "iloveyou1", "letmein1", "welcome1", "welcome123", "admin123", "administrator",
+            "monkey123", "dragon123", "football", "baseball", "basketball", "superman",
+            "trustno1", "sunshine", "princess", "starwars", "whatever", "mustang1",
+            "michael1", "jennifer", "computer", "internet", "changeme", "default123",
+            "netchill", "netchill1", "netchill123", "netflix1", "netflix123", "netflixchill"));
+
+    // CPU protection. A PBKDF2 hash is deliberately expensive, so only a few may run at the
+    // same time and the whole API only accepts so many login/register attempts per minute.
+    private static final int HASH_CONCURRENCY = envInt("HASH_CONCURRENCY", 2, 1, 8);
+    private static final int GLOBAL_AUTH_PER_MINUTE = envInt("GLOBAL_AUTH_PER_MINUTE", 120, 10, 100_000);
+    private static final long HASH_WAIT_MS = 4_000L;
+    private static final Semaphore HASH_SLOTS = new Semaphore(HASH_CONCURRENCY, true);
 
     private AuthServer() {
     }
@@ -71,6 +108,13 @@ public final class AuthServer {
     private static final class BadRequest extends RuntimeException {
         BadRequest(String message) {
             super(message);
+        }
+    }
+
+    /** Thrown when too many password hashes are already running; turned into a 429 by safe(). */
+    private static final class Busy extends RuntimeException {
+        Busy() {
+            super("Server is busy", null, false, false);
         }
     }
 
@@ -174,6 +218,9 @@ public final class AuthServer {
                 handler.handle(exchange);
             } catch (BadRequest error) {
                 respond(exchange, 400, error.getMessage());
+            } catch (Busy error) {
+                exchange.getResponseHeaders().set("Retry-After", "10");
+                respond(exchange, 429, "Server is busy. Please try again shortly.");
             } catch (Exception error) {
                 error.printStackTrace();
                 try {
@@ -187,6 +234,7 @@ public final class AuthServer {
 
     private static void register(HttpExchange exchange) throws IOException {
         if (!isPost(exchange)) return;
+        if (!allowGlobalAttempt(exchange)) return;
 
         String ip = clientIp(exchange);
         String ipKey = "register:ip:" + ip;
@@ -204,8 +252,13 @@ public final class AuthServer {
         String dobRaw = data.getOrDefault("date_of_birth", "").trim();
 
         if (email.length() > 254 || !EMAIL.matcher(email).matches()
-                || password.length() < 6 || password.length() > 128) {
+                || password.length() > PASSWORD_MAX_LENGTH) {
             respond(exchange, 400, "Invalid email or password");
+            return;
+        }
+        String passwordProblem = passwordProblem(password, email);
+        if (passwordProblem != null) {
+            respond(exchange, 400, passwordProblem);
             return;
         }
         if (!validName(firstName) || !validName(lastName)) {
@@ -233,7 +286,7 @@ public final class AuthServer {
                      "INSERT INTO users (email, password_hash, password_salt, password_iterations, first_name, last_name, date_of_birth) "
                              + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
             statement.setString(1, email);
-            statement.setString(2, hash(password, salt, ITERATIONS));
+            statement.setString(2, hashLimited(password, salt, ITERATIONS));
             statement.setBytes(3, salt);
             statement.setInt(4, ITERATIONS);
             statement.setString(5, firstName);
@@ -257,6 +310,7 @@ public final class AuthServer {
 
     private static void login(HttpExchange exchange) throws IOException {
         if (!isPost(exchange)) return;
+        if (!allowGlobalAttempt(exchange)) return;
 
         Map<String, String> data = parseForm(exchange);
         String email = data.getOrDefault("email", "").trim().toLowerCase(Locale.ROOT);
@@ -292,7 +346,7 @@ public final class AuthServer {
                 if (result.next()) {
                     int iterations = result.getInt("password_iterations");
                     if (iterations <= 0) iterations = LEGACY_ITERATIONS;
-                    String computed = hash(password, result.getBytes("password_salt"), iterations);
+                    String computed = hashLimited(password, result.getBytes("password_salt"), iterations);
                     authenticated = MessageDigest.isEqual(
                             computed.getBytes(StandardCharsets.UTF_8),
                             result.getString("password_hash").getBytes(StandardCharsets.UTF_8));
@@ -302,7 +356,7 @@ public final class AuthServer {
                     }
                 } else {
                     // Unknown email: do equivalent work so response time doesn't reveal it.
-                    hash(password, DUMMY_SALT, ITERATIONS);
+                    hashLimited(password, DUMMY_SALT, ITERATIONS);
                 }
             }
 
@@ -322,7 +376,7 @@ public final class AuthServer {
                     RANDOM.nextBytes(newSalt);
                     try (PreparedStatement upgrade = connection.prepareStatement(
                             "UPDATE users SET password_hash = ?, password_salt = ?, password_iterations = ? WHERE email = ?")) {
-                        upgrade.setString(1, hash(password, newSalt, ITERATIONS));
+                        upgrade.setString(1, hashLimited(password, newSalt, ITERATIONS));
                         upgrade.setBytes(2, newSalt);
                         upgrade.setInt(3, ITERATIONS);
                         upgrade.setString(4, email);
@@ -330,6 +384,8 @@ public final class AuthServer {
                     }
                 } catch (SQLException upgradeError) {
                     upgradeError.printStackTrace(); // login still succeeds
+                } catch (Busy skipped) {
+                    // Server is busy hashing; the upgrade simply happens on the next login.
                 }
             }
 
@@ -353,25 +409,125 @@ public final class AuthServer {
         return value.length() >= 1 && value.length() <= 50 && NAME.matcher(value).matches();
     }
 
+    /**
+     * Works out which visitor a request belongs to, for rate limiting. Sources, in order:
+     * 1. The IP the Streamlit frontend forwards, but only if it proves who it is with the
+     *    shared secret (so nobody else can claim an IP).
+     * 2. The header the edge sets itself (CF-Connecting-IP on Render); clients cannot forge it.
+     * 3. The socket address (behind Render this is the proxy, so unknown callers share one bucket).
+     * X-Forwarded-For is never used because a client can send any value in it.
+     */
     private static String clientIp(HttpExchange exchange) {
-        // Streamlit calls this API server-to-server, so without help every user would look
-        // like the same IP. If Streamlit proves who it is with the shared secret, trust the
-        // end-user IP it forwards; anyone else can't spoof it.
-        String key = exchange.getRequestHeaders().getFirst("X-Api-Key");
-        String forwardedClient = exchange.getRequestHeaders().getFirst("X-Client-IP");
-        if (API_SECRET != null && !API_SECRET.isBlank() && key != null && forwardedClient != null
+        Headers headers = exchange.getRequestHeaders();
+
+        String key = headers.getFirst("X-Api-Key");
+        if (API_SECRET != null && !API_SECRET.isBlank() && key != null
                 && MessageDigest.isEqual(key.getBytes(StandardCharsets.UTF_8),
-                                         API_SECRET.getBytes(StandardCharsets.UTF_8))
-                && IP_LIKE.matcher(forwardedClient.trim()).matches()) {
-            return forwardedClient.trim();
+                                         API_SECRET.getBytes(StandardCharsets.UTF_8))) {
+            String forwarded = normalizeIp(headers.getFirst("X-Client-IP"));
+            if (forwarded != null) return forwarded;
         }
 
-        // Otherwise: behind Render's proxy the real client is in X-Forwarded-For.
-        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
+        if (CLIENT_IP_HEADER != null) {
+            String edge = normalizeIp(headers.getFirst(CLIENT_IP_HEADER));
+            if (edge != null) return edge;
         }
-        return exchange.getRemoteAddress().getAddress().getHostAddress();
+
+        InetSocketAddress remote = exchange.getRemoteAddress();
+        String socket = remote == null ? null : normalizeIp(remote.getAddress().getHostAddress());
+        return socket != null ? socket : "unknown";
+    }
+
+    /**
+     * Returns a canonical rate-limit key for an IP address, or null if the text is not a valid
+     * IP. IPv6 addresses are grouped by their /64 prefix so one connection cannot rotate through
+     * billions of addresses to dodge the limits. Never performs a DNS lookup.
+     */
+    static String normalizeIp(String raw) {
+        if (raw == null) return null;
+        String value = raw.trim();
+        if (value.length() < 3 || value.length() > 45) return null;
+        if (IPV4.matcher(value).matches()) return value;
+        if (value.indexOf(':') >= 0 && IP_LIKE.matcher(value).matches()) {
+            try {
+                // Contains ':' so Java parses it as an IPv6 literal and never queries DNS.
+                InetAddress address = InetAddress.getByName(value);
+                byte[] bytes = address.getAddress();
+                if (bytes.length == 4) return address.getHostAddress(); // IPv4-mapped IPv6
+                return String.format("%02x%02x:%02x%02x:%02x%02x:%02x%02x::/64",
+                        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]);
+            } catch (UnknownHostException invalid) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static String clientIpHeaderName() {
+        String configured = System.getenv("CLIENT_IP_HEADER");
+        if (configured == null) return "CF-Connecting-IP";
+        configured = configured.trim();
+        if (configured.isEmpty() || "none".equalsIgnoreCase(configured)) return null;
+        return configured;
+    }
+
+    /** Reads an integer environment variable, falling back to a default if missing or invalid. */
+    private static int envInt(String name, int fallback, int min, int max) {
+        try {
+            String raw = System.getenv(name);
+            if (raw == null || raw.isBlank()) return fallback;
+            int value = Integer.parseInt(raw.trim());
+            return Math.max(min, Math.min(max, value));
+        } catch (NumberFormatException invalid) {
+            return fallback;
+        }
+    }
+
+    /** Returns a user-facing reason if the password is not acceptable for a new account, else null. */
+    static String passwordProblem(String password, String email) {
+        if (password.length() < PASSWORD_MIN_LENGTH) {
+            return "Password must be at least " + PASSWORD_MIN_LENGTH + " characters.";
+        }
+        String lower = password.toLowerCase(Locale.ROOT);
+        String localPart = email.contains("@") ? email.substring(0, email.indexOf('@')) : email;
+        if (lower.equals(email) || lower.equals(localPart)) {
+            return "Password can't be the same as your email address.";
+        }
+        if (COMMON_PASSWORDS.contains(lower)) {
+            return "That password is too common. Please choose a less predictable one.";
+        }
+        if (password.chars().distinct().count() < 4) {
+            return "That password is too repetitive. Please choose a less predictable one.";
+        }
+        return null;
+    }
+
+    /** Backstop for the whole API: caps login+register attempts per minute across all clients. */
+    private static boolean allowGlobalAttempt(HttpExchange exchange) throws IOException {
+        if (LIMITER.isLimited("global:auth", GLOBAL_AUTH_PER_MINUTE, 60_000L)) {
+            exchange.getResponseHeaders().set("Retry-After", "30");
+            respond(exchange, 429, "Server is busy. Please try again shortly.");
+            return false;
+        }
+        LIMITER.record("global:auth");
+        return true;
+    }
+
+    /** Like hash(), but at most HASH_CONCURRENCY run at once; others wait briefly, then give up. */
+    static String hashLimited(String password, byte[] salt, int iterations) {
+        boolean acquired;
+        try {
+            acquired = HASH_SLOTS.tryAcquire(HASH_WAIT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new Busy();
+        }
+        if (!acquired) throw new Busy();
+        try {
+            return hash(password, salt, iterations);
+        } finally {
+            HASH_SLOTS.release();
+        }
     }
 
     private static Connection database() throws SQLException {

@@ -1,4 +1,5 @@
 import os
+import ipaddress
 import json
 import time
 import html
@@ -34,15 +35,37 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
 # IP we forward, so rate limits apply per user instead of to this server as a whole.
 API_SHARED_SECRET = os.getenv("API_SHARED_SECRET", "")
 
+def _clean_ip(value) -> str:
+    """Returns the value as a canonical IP address, or "" if it is not a valid one."""
+    try:
+        return str(ipaddress.ip_address((value or "").strip()))
+    except ValueError:
+        return ""
+
+def _pick_visitor_ip(headers) -> tuple:
+    """Returns (ip, source) for the visitor. CF-Connecting-IP is preferred because Cloudflare
+    (in front of Render) overwrites it, so a visitor cannot forge it. X-Forwarded-For is only a
+    fallback: a visitor can pre-fill it, so it is weaker."""
+    lowered = {str(k).lower(): v for k, v in headers.items()}
+    ip = _clean_ip(lowered.get("cf-connecting-ip", ""))
+    if ip:
+        return ip, "cf-connecting-ip"
+    ip = _clean_ip(lowered.get("x-forwarded-for", "").split(",")[0])
+    if ip:
+        return ip, "x-forwarded-for"
+    return "", "none"
+
 def _backend_headers() -> dict:
     headers = {}
     if API_SHARED_SECRET:
         headers["X-Api-Key"] = API_SHARED_SECRET
         try:
-            forwarded = st.context.headers.get("X-Forwarded-For", "")
-            client_ip = forwarded.split(",")[0].strip()
+            client_ip, source = _pick_visitor_ip(st.context.headers)
             if client_ip:
                 headers["X-Client-IP"] = client_ip
+            if not st.session_state.get("_client_ip_source_logged"):
+                st.session_state["_client_ip_source_logged"] = True
+                print(f"[client-ip] source={source}", flush=True)  # source only, never the IP
         except Exception:
             pass  # older Streamlit without st.context: backend falls back to its own detection
     return headers
@@ -141,8 +164,10 @@ if (BACKEND_API_URL.startswith("http")
             import streamlit.components.v1 as components
             components.html(_wake_page, height=0)
         except Exception:
-            # Newer replacement, used automatically once components.html is gone.
-            st.iframe(_wake_page, height=1)
+            # Newer replacement, used automatically once components.html is gone. Loading the
+            # backend address directly in a 1px frame is the same browser request as the iframe
+            # above (and needs no script).
+            st.iframe(_home, height=1)
     except Exception as exc:  # never let the warm-up break the page
         print(f"[browser-wake] skipped: {type(exc).__name__}: {exc}", flush=True)
 
@@ -453,8 +478,8 @@ def show_login_dialog():
     if st.button("Sign In", use_container_width=True, type="primary"):
         if not valid_email(email):
             st.error("Enter a valid email address.")
-        elif not (6 <= len(password) <= 128):
-            st.error("Password must be 6-128 characters.")
+        elif not (1 <= len(password) <= 128):
+            st.error("Enter your password (up to 128 characters).")
         else:
             try:
                 # Java accepts form URL encoding (x-www-form-urlencoded) parameters natively
@@ -477,7 +502,7 @@ def show_login_dialog():
                 st.session_state.current_profile = name
                 st.rerun()
             elif response.status_code == 429:
-                st.error("Too many attempts. Please wait a few minutes and try again.")
+                st.error("Too many attempts, or the server is busy. Please wait a minute and try again.")
             elif response.status_code == 401:
                 st.error("Incorrect email or password.")
             else:
@@ -514,13 +539,16 @@ def show_registration_dialog():
     st.text(f"Hi {st.session_state.signup_first_name} — choose your plan and set a password.")
     plan = st.radio("Choose your plan", ["Basic - $8.99/mo", "Standard - $15.49/mo", "Premium - $22.99/mo"], index=2)
     email = st.text_input("Email address", value=st.session_state.signup_email).strip().lower()
-    password = st.text_input("Create Password", type="password")
+    password = st.text_input(
+        "Create Password", type="password",
+        help="At least 8 characters. Avoid common passwords and your email address.",
+    )
 
     if st.button("Register & Start Membership", use_container_width=True, type="primary"):
         if not valid_email(email):
             st.error("Please enter a valid email address.")
-        elif len(password) < 6 or len(password) > 128:
-            st.error("Password must be between 6 and 128 characters.")
+        elif len(password) < 8 or len(password) > 128:
+            st.error("Password must be between 8 and 128 characters.")
         elif not (valid_name(st.session_state.signup_first_name) and valid_name(st.session_state.signup_last_name)):
             st.error("Please go back and re-enter your name.")
         else:
@@ -548,9 +576,10 @@ def show_registration_dialog():
             elif response.status_code == 409:
                 st.error("An account with that email already exists. Try signing in instead.")
             elif response.status_code == 429:
-                st.error("Too many attempts. Please try again later.")
+                st.error("Too many attempts, or the server is busy. Please wait a minute and try again.")
             elif response.status_code == 400:
-                st.error("Please check your details and try again.")
+                # The backend's 400 messages are fixed, user-friendly strings (e.g. password rules).
+                st.error(response.text.strip()[:200] or "Please check your details and try again.")
             else:
                 show_backend_error(response)
 

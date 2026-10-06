@@ -1,0 +1,15 @@
+# The image is published to a PUBLIC Docker Hub repository, so never copy secrets into it
+.git
+.gitignore
+.env
+.env.*
+*.pem
+*.key
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+Dockerfile
+.dockerignore
