@@ -19,9 +19,7 @@ def _flatten_html(html_str: str) -> str:
     HTML -- flattening avoids that entirely."""
     return re.sub(r"\s+", " ", html_str).strip()
 
-# =========================================================================
 # 1. SETUP & UTILITY HOOKS
-# =========================================================================
 st.set_page_config(page_title="NETCHILL | Watch Movies and TV Shows Online", page_icon="🍿", layout="wide")
 
 # Set BACKEND_API_URL to the deployed API URL in Render; use localhost for local development.
@@ -215,7 +213,7 @@ def _request_unsplash(count: int) -> list:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_unsplash(seed: int, count: int) -> list:
-    # Cached for 1 hour so we don't call the API on every rerun.
+    # Cached for 1 hour so it doesn't call the API on every rerun.
     # Errors aren't cached, so a failed call is retried next time.
     return _request_unsplash(count)
 
@@ -228,8 +226,8 @@ def fetch_unsplash_images(seed: int, count: int = 30) -> list:
     except Exception:
         return []
 
-# ---- Poster-card generator ---------------------------------------------
-# Movie/TV cards: a gradient picked from the title, plus genre and rating.
+#  Poster-card generator 
+
 _PALETTES = [
     ("#1f1c2c", "#928dab"), ("#0f2027", "#2c5364"), ("#3a1c71", "#d76d77"),
     ("#0f0c29", "#302b63"), ("#833ab4", "#fd1d1d"), ("#134e5e", "#71b280"),
@@ -465,9 +463,7 @@ def sign_out_action():
     st.success("Successfully logged out.")
     st.rerun()
 
-# =========================================================================
 # 2. DIALOG INTERFACES (COMMUNICATES WITH JAVA BACKEND CONTROLLERS)
-# =========================================================================
 
 @st.dialog("Sign In")
 def show_login_dialog():
@@ -583,19 +579,21 @@ def show_registration_dialog():
             else:
                 show_backend_error(response)
 
-# =========================================================================
 # 3. INTERACTION FEEDS & PLATFORM WORKSPACES
-# =========================================================================
 
 def landing_page():
     st.markdown(build_hero_poster_wall_html(), unsafe_allow_html=True)
 
-    if st.session_state.signup_step == "info":
+    # Streamlit allows only ONE dialog per script run, so exactly one branch runs.
+    # A Sign In click sets login_requested and reruns; it also clears any signup
+    # step, so the login dialog never competes with a signup dialog.
+    if st.session_state.pop("login_requested", False):
+        show_login_dialog()
+    elif st.session_state.signup_step == "info":
         show_personal_info_dialog()
     elif st.session_state.signup_step == "plan":
         show_registration_dialog()
 
-    # Top bar: empty left | NETCHILL centered | Sign In on the right side 
     nav_left, nav_center, nav_right = st.columns([3, 4, 3])
     with nav_center:
         st.markdown(
@@ -608,7 +606,9 @@ def landing_page():
         _spacer, signin_col = st.columns([1, 1])   # button takes half of this column
         with signin_col:
             if st.button("Sign In", use_container_width=True, type="primary"):
-                show_login_dialog()
+                st.session_state.signup_step = None
+                st.session_state.login_requested = True
+                st.rerun()
 
     st.write("")
     st.markdown('<h1 class="hero-title">Unlimited movies, TV shows, and more.</h1>', unsafe_allow_html=True)

@@ -8,13 +8,11 @@ envVarGroups:
         generateValue: true
 
 services:
-  # 1. Frontend Streamlit Web Service
   - type: web
     name: netchill-frontend
     runtime: image
     plan: free
-    image:
-      # Render automatically links to your public Docker Hub repositories without any credentials!
+    image:  
       url: docker.io/valinerness/netchill-frontend:latest
     envVars:
       - fromGroup: netchill-shared
@@ -23,7 +21,6 @@ services:
       - key: BACKEND_API_URL
         value: https://netchill-backend.onrender.com
 
-  # 2. Backend Java Web Service
   - type: web
     name: netchill-backend
     runtime: image

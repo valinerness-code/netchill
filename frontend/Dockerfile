@@ -1,4 +1,3 @@
-# Official, lightweight Python base image (same Python version the CI checks use)
 FROM python:3.12-slim
 WORKDIR /app
 
