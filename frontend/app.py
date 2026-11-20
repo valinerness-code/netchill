@@ -5,6 +5,8 @@ import time
 import html
 import random
 import hashlib
+import hmac
+import urllib.parse
 import streamlit as st
 import re
 import requests
@@ -32,6 +34,12 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
 # Cloudflare Worker that serves the catalog (D1) plus the posters and videos (R2).
 # Set NETCHILL_WORKER_URL in Render's Environment tab, e.g. https://netchill-media.yourname.workers.dev
 WORKER_URL = os.getenv("NETCHILL_WORKER_URL", "").rstrip("/")
+
+# Signs video links so only this site can create working ones. Must equal MEDIA_SIGNING_SECRET on the
+# Cloudflare Worker. Set it only in Render's Environment tab (never in the repo). Until it is set, links are unsigned.
+MEDIA_SIGNING_SECRET = os.getenv("MEDIA_SIGNING_SECRET", "")
+MEDIA_LINK_HOURS = 6          # a signed link works for 6 to 7 hours
+SIGNED_PREFIX = "videos/"     # must match PROTECTED_PREFIX in the Worker
 
 # Must equal API_SHARED_SECRET on the Java service. Lets the backend trust the end-user
 # IP we forward, so rate limits apply per user instead of to this server as a whole.
@@ -223,6 +231,20 @@ def fetch_catalog(kind: str = "", q: str = "", limit: int = 60) -> list:
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_title(title_id: int) -> dict:
     return _worker_get(f"/titles/{int(title_id)}")
+
+def sign_media_url(url: str) -> str:
+    """Adds ?exp=...&sig=... to a video link. The signature covers the file's key and the expiry time.
+    The expiry is rounded to the hour so the link stays identical across Streamlit reruns (the video
+    does not restart when the page redraws)."""
+    if not MEDIA_SIGNING_SECRET or not _safe_media_url(url):
+        return url
+    path = urllib.parse.urlsplit(url).path
+    key = urllib.parse.unquote(path[len("/media/"):])
+    if not key.startswith(SIGNED_PREFIX):
+        return url
+    exp = (int(time.time()) // 3600 + MEDIA_LINK_HOURS + 1) * 3600
+    sig = hmac.new(MEDIA_SIGNING_SECRET.encode("utf-8"), f"{key}\n{exp}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{url}?exp={exp}&sig={sig}"
 
 def _log_worker_error(where: str, exc: Exception):
     """Prints the reason to the Render logs (visitors only see a friendly message).
@@ -775,7 +797,7 @@ def open_player(title_id: int):
                 video_url = episodes[choice]["video_url"]
 
         if video_url and _safe_media_url(video_url):
-            st.video(video_url, autoplay=True)
+            st.video(sign_media_url(video_url), autoplay=True)
         elif t["kind"] == "movie":
             st.info("This title has no video yet.")
 
