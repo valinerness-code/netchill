@@ -29,6 +29,10 @@ BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8080").rstrip("
 # so the default is generous. Override with the REQUEST_TIMEOUT env var if you like.
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "60"))
 
+# Cloudflare Worker that serves the catalog (D1) plus the posters and videos (R2).
+# Set NETCHILL_WORKER_URL in Render's Environment tab, e.g. https://netchill-media.yourname.workers.dev
+WORKER_URL = os.getenv("NETCHILL_WORKER_URL", "").rstrip("/")
+
 # Must equal API_SHARED_SECRET on the Java service. Lets the backend trust the end-user
 # IP we forward, so rate limits apply per user instead of to this server as a whole.
 API_SHARED_SECRET = os.getenv("API_SHARED_SECRET", "")
@@ -196,6 +200,33 @@ _UNSPLASH_URL_RE = re.compile(r"https://images\.unsplash\.com/[A-Za-z0-9._~:/?#\
 def _safe_image_url(url) -> bool:
     return isinstance(url, str) and len(url) < 2000 and _UNSPLASH_URL_RE.fullmatch(url) is not None
 
+# ---- Catalog from the Cloudflare Worker (server-to-server, so no CORS needed) ----
+def _worker_get(path: str, params: dict = None):
+    resp = requests.get(f"{WORKER_URL}{path}", params=params, timeout=15)
+    resp.raise_for_status()
+    return resp.json()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_catalog(kind: str = "", q: str = "", limit: int = 60) -> list:
+    """Titles from the Worker. Returns [] if the Worker is not configured or unreachable.
+    Errors are not cached, so a failed call is retried on the next rerun."""
+    if not WORKER_URL:
+        return []
+    params = {"limit": limit}
+    if kind:
+        params["kind"] = kind
+    if q:
+        params["q"] = q
+    return _worker_get("/catalog", params)["results"]
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_title(title_id: int) -> dict:
+    return _worker_get(f"/titles/{int(title_id)}")
+
+def _safe_media_url(url) -> bool:
+    """Only accept media links that point at our own Worker."""
+    return isinstance(url, str) and bool(WORKER_URL) and url.startswith(WORKER_URL + "/media/") and len(url) < 2000
+
 if "bg_seed" not in st.session_state:
     st.session_state.bg_seed = random.randint(1, 1_000_000)
 
@@ -342,6 +373,32 @@ def poster_card_html(title: str, genre: str = "Drama", rating: str = None, heigh
     """
     return _flatten_html(result)
 
+def poster_image_card_html(title: str, poster_url: str, genre: str = "", height: int = 260) -> str:
+    """Real poster from the Worker. Uses an <img> tag (HTML-escaped src), not CSS url('...'),
+    so an apostrophe in a file name can't break out of the markup."""
+    safe_title = html.escape(title)
+    safe_genre = html.escape(genre)
+    img = ""
+    if _safe_media_url(poster_url):
+        img = (f'<img src="{html.escape(poster_url, quote=True)}" alt="{safe_title}" loading="lazy" '
+               f'style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;">')
+    chip = (f'<span style="position:absolute; top:10px; left:10px; background:rgba(0,0,0,0.55); color:#FFD166; '
+            f'font-size:0.7rem; font-weight:700; padding:2px 8px; border-radius:4px; letter-spacing:1px; '
+            f'text-transform:uppercase;">{safe_genre}</span>') if genre else ""
+    result = f"""
+    <div class="poster-tile" style="position:relative; height:{int(height)}px; border-radius:10px; overflow:hidden;
+        background:#1a1a22; box-shadow:0 8px 20px rgba(0,0,0,0.55); border:1px solid rgba(255,255,255,0.08);
+        margin-bottom:8px;">
+        {img}
+        <div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 45%);"></div>
+        <div class="poster-play">&#9654;</div>
+        {chip}
+        <div style="position:absolute; left:10px; right:10px; bottom:10px; text-align:center; color:#fff;
+            font-weight:800; font-size:0.95rem; text-shadow:0 2px 8px rgba(0,0,0,0.8);">{safe_title}</div>
+    </div>
+    """
+    return _flatten_html(result)
+
 # 2. Base theme: .stApp is transparent so the background wall shows through.
 st.markdown(f"""
     <style>
@@ -426,6 +483,41 @@ st.markdown(f"""
         margin-right: 6px;
     }}
     input[type="radio"] {{ accent-color: #E50914; }}
+
+    /* Clickable posters: the real Streamlit button is stretched, invisibly, over the whole poster */
+    div[class*="st-key-poster_"] {{ position: relative; }}
+    /* Streamlit wraps each element in its own positioned box; unset it so the button anchors to the poster */
+    div[class*="st-key-poster_"] [data-testid="stElementContainer"] {{ position: static !important; }}
+    div[class*="st-key-poster_"] [data-testid="stButton"] {{
+        position: absolute !important; inset: 0 !important; margin: 0 !important; z-index: 10;
+    }}
+    div[class*="st-key-poster_"] [data-testid="stButton"] > div,
+    div[class*="st-key-poster_"] [data-testid="stButton"] button {{
+        width: 100% !important; height: 100% !important; min-height: 0 !important;
+    }}
+    div[class*="st-key-poster_"] button {{
+        opacity: 0 !important; cursor: pointer !important; padding: 0 !important; border-radius: 10px !important;
+    }}
+    div[class*="st-key-poster_"]:hover .poster-tile {{
+        transform: scale(1.045); box-shadow: 0 16px 34px rgba(0,0,0,0.75) !important; z-index: 5;
+    }}
+    div[class*="st-key-poster_"]:focus-within .poster-tile {{ outline: 3px solid #E50914; }}
+    .poster-play {{
+        position: absolute; top: 50%; left: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+        border-radius: 50%; background: rgba(229,9,20,0.92); color: #fff; font-size: 1.4rem;
+        display: flex; align-items: center; justify-content: center; padding-left: 4px;
+        opacity: 0; transition: opacity 0.2s ease;
+    }}
+    div[class*="st-key-poster_"]:hover .poster-play,
+    div[class*="st-key-poster_"]:focus-within .poster-play {{ opacity: 1; }}
+
+    /* In-page player (opens over the page, Netflix style) */
+    [data-testid="stDialog"] > div {{ width: min(1100px, 95vw) !important; max-width: 95vw !important; background: #141414 !important; }}
+    [role="dialog"] {{ width: 100% !important; max-width: none !important; }}
+    [role="dialog"] video {{ width: 100%; max-height: 70vh; background: #000; border-radius: 6px; }}
+    [role="dialog"] {{ background: #141414 !important; color: #FFF !important; }}
+    [role="dialog"] h1, [role="dialog"] h2, [role="dialog"] h3,
+    [role="dialog"] [data-testid="stCaptionContainer"], [role="dialog"] button svg {{ color: #FFF !important; }}
     </style>
     """, 
     unsafe_allow_html=True
@@ -631,6 +723,79 @@ def landing_page():
                 st.session_state.signup_step = "info"
                 st.rerun()
 
+def _episode_label(e: dict) -> str:
+    return f"S{e['season']}E{e['episode']}" + (f" - {e['name']}" if e.get("name") else "")
+
+def _next_episode(sel_key: str, last_index: int):
+    """Button callback: jump to the next episode (runs before the widget is redrawn)."""
+    st.session_state[sel_key] = min(st.session_state.get(sel_key, 0) + 1, last_index)
+
+def open_player(title_id: int):
+    """Opens the title in a large pop-up player on top of the page and starts playing it.
+    The browser streams the video straight from the Worker."""
+    try:
+        t = fetch_title(int(title_id))
+    except requests.RequestException:
+        st.error("Couldn't load that title right now. Please try again.")
+        return
+
+    @st.dialog(t["name"], width="large")
+    def _player():
+        if t.get("description"):
+            st.caption(t["description"])
+
+        video_url = None
+        if t["kind"] == "movie":
+            video_url = t.get("video_url")
+        else:
+            episodes = t.get("episodes") or []
+            if not episodes:
+                st.info("No episodes have been added for this show yet.")
+            else:
+                sel_key = f"ep_{t['id']}"
+                picker, nxt = st.columns([4, 1])
+                with picker:
+                    choice = st.selectbox(
+                        "Episode", range(len(episodes)), format_func=lambda i: _episode_label(episodes[i]),
+                        key=sel_key, label_visibility="collapsed",
+                    )
+                with nxt:
+                    st.button("Next ▶", key=f"next_{t['id']}", use_container_width=True,
+                              disabled=choice >= len(episodes) - 1,
+                              on_click=_next_episode, args=(sel_key, len(episodes) - 1))
+                video_url = episodes[choice]["video_url"]
+
+        if video_url and _safe_media_url(video_url):
+            st.video(video_url, autoplay=True)
+        elif t["kind"] == "movie":
+            st.info("This title has no video yet.")
+
+    _player()
+
+def _render_title_row(heading: str, kind: str, key_prefix: str, q: str = ""):
+    st.markdown(f'<div class="section-title">{heading}</div>', unsafe_allow_html=True)
+    try:
+        titles = fetch_catalog(kind=kind, q=q)
+    except requests.RequestException:
+        st.warning("The catalog is unavailable right now. Please try again in a moment.")
+        return
+    if not titles:
+        st.caption("Nothing here yet." if WORKER_URL else "Catalog not configured (set NETCHILL_WORKER_URL).")
+        return
+    per_row = 4
+    for start in range(0, len(titles), per_row):
+        cols = st.columns(per_row)
+        for offset, t in enumerate(titles[start:start + per_row]):
+            with cols[offset]:
+                genre = t["tags"][0] if t.get("tags") else ""
+                # The poster IS the button: the button is stretched invisibly over the poster by CSS.
+                with st.container(key=f"poster_{key_prefix}_{t['id']}"):
+                    st.markdown(poster_image_card_html(t["name"], t.get("poster_url", ""), genre), unsafe_allow_html=True)
+                    verb = "Play" if kind == "movie" else "Watch"
+                    clicked = st.button(f"{verb} {t['name']}", key=f"{key_prefix}_{t['id']}")
+                if clicked:
+                    open_player(t["id"])
+
 def dashboard_page():
     view_selection = st.radio("Filter Content Matrix", ["Home", "Series", "Movies"], horizontal=True, label_visibility="collapsed")
     color_emoji = "🟡" if st.session_state.profile_color == "amber" else "🔴" if st.session_state.profile_color == "pink" else "🔵"
@@ -640,29 +805,12 @@ def dashboard_page():
         unsafe_allow_html=True,
     )
 
-    if view_selection in ["Home", "Movies"]:
-        st.markdown('<div class="section-title">Movies</div>', unsafe_allow_html=True)
-        m_cols = st.columns(4)
-        movies = [
-            ("Midnight Run", "Thriller"), ("Skyline", "Sci-Fi"),
-            ("Crimson Tide", "Action"), ("Neon Glow", "Drama"),
-        ]
-        for idx, (item, genre) in enumerate(movies):
-            with m_cols[idx]:
-                st.markdown(poster_card_html(item, genre), unsafe_allow_html=True)
-                st.button("Play Video", key=f"mov_{idx}", use_container_width=True)
+    search = st.text_input("Search", placeholder="Search titles", label_visibility="collapsed", max_chars=60).strip()
 
+    if view_selection in ["Home", "Movies"]:
+        _render_title_row("Movies", "movie", "mov", q=search)
     if view_selection in ["Home", "Series"]:
-        st.markdown('<div class="section-title">TV Shows</div>', unsafe_allow_html=True)
-        t_cols = st.columns(4)
-        shows = [
-            ("Nightfall", "Mystery"), ("Signal Ridge", "Sci-Fi"),
-            ("Glass City", "Drama"), ("Thorn Lane", "Horror"),
-        ]
-        for idx, (item, genre) in enumerate(shows):
-            with t_cols[idx]:
-                st.markdown(poster_card_html(item, genre), unsafe_allow_html=True)
-                st.button("Watch Episode", key=f"tv_{idx}", use_container_width=True)
+        _render_title_row("TV Shows", "show", "tv", q=search)
 
 def manage_profiles_page():
     st.markdown('<div class="section-title" style="text-align:center;">Manage Profiles</div>', unsafe_allow_html=True)

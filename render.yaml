@@ -20,6 +20,8 @@ services:
         value: "8501"
       - key: BACKEND_API_URL
         value: https://netchill-backend.onrender.com
+      # NETCHILL_WORKER_URL is deliberately NOT listed here (this repo is public).
+      # Set it once in Render: netchill-frontend > Environment.
 
   - type: web
     name: netchill-backend
