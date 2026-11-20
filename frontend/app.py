@@ -202,7 +202,8 @@ def _safe_image_url(url) -> bool:
 
 # ---- Catalog from the Cloudflare Worker (server-to-server, so no CORS needed) ----
 def _worker_get(path: str, params: dict = None):
-    resp = requests.get(f"{WORKER_URL}{path}", params=params, timeout=15)
+    resp = requests.get(f"{WORKER_URL}{path}", params=params, timeout=15,
+                        headers={"User-Agent": "NetchillFrontend/1.0", "Accept": "application/json"})
     resp.raise_for_status()
     return resp.json()
 
@@ -222,6 +223,13 @@ def fetch_catalog(kind: str = "", q: str = "", limit: int = 60) -> list:
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_title(title_id: int) -> dict:
     return _worker_get(f"/titles/{int(title_id)}")
+
+def _log_worker_error(where: str, exc: Exception):
+    """Prints the reason to the Render logs (visitors only see a friendly message).
+    Shows the status code or error type and the host, never any secret."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    print(f"[worker] {where} failed: {type(exc).__name__} status={status} url_set={bool(WORKER_URL)} "
+          f"scheme_ok={WORKER_URL.startswith('https://')} :: {str(exc)[:200]}", flush=True)
 
 def _safe_media_url(url) -> bool:
     """Only accept media links that point at our own Worker."""
@@ -735,7 +743,8 @@ def open_player(title_id: int):
     The browser streams the video straight from the Worker."""
     try:
         t = fetch_title(int(title_id))
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        _log_worker_error("title", exc)
         st.error("Couldn't load that title right now. Please try again.")
         return
 
@@ -776,7 +785,8 @@ def _render_title_row(heading: str, kind: str, key_prefix: str, q: str = ""):
     st.markdown(f'<div class="section-title">{heading}</div>', unsafe_allow_html=True)
     try:
         titles = fetch_catalog(kind=kind, q=q)
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        _log_worker_error("catalog", exc)
         st.warning("The catalog is unavailable right now. Please try again in a moment.")
         return
     if not titles:
